@@ -14,11 +14,9 @@ This chart provides a means of deploying Netbird to kubernetes.
 
 To use the minimal setup, you will require
 
-- A working kubernetes cluster
-- A default storage class with space to provision 2 volume claims
-- A worker node which you can port forward traffic to
-- A valid hostname and the ability to access it via HTTPS
-- A working Auth provider (default config is for Keycloak)
+- A working kubernetes cluster with GatewayAPI enabled
+- A default storage class with space to provision a PVC (default 4Gi)
+- A valid hostname and the ability to access it via https and UDP 3478 through the Gateway
 
 1. Fill out the required config
    ```yaml
