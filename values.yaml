@@ -64,6 +64,11 @@ global:
 
   persistence:
     enabled: true
+    # Set this explicitly under GitOps: the fallback that reuses an existing
+    # PVC's class relies on `lookup`, which is inert under `helm template`.
+    # Leave it unset for "let the cluster default decide"; set it to the empty
+    # string for "no dynamic provisioning, bind a PV I created myself". Those
+    # are different requests and the chart renders them differently.
     storageClass:
     volumeName: 'data'
     existingClaim: ''
