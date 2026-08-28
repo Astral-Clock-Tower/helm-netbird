@@ -13,7 +13,21 @@ global:
     port: 80
   server:
     port: 80
+    # DEPRECATED: use global.server.stun.port. Still the source of the default
+    # so that existing installs overriding this keep working.
     stun_port: 3478
+    stun:
+      # Serve STUN from the server pod. This advertises the port in the config
+      # (stunPorts) AND exposes it: the container port, the UDP port on the
+      # server Service, and the UDPRoute all follow it. Turn it off when peers
+      # reach STUN somewhere else (see `external` below) so the chart stops
+      # opening a port nothing is listening on.
+      enabled: true
+      # Overrides stun_port when set.
+      port:
+      # Additional external STUN servers to advertise to peers (stuns), ex
+      # ['stun:stun.l.google.com:19302'].
+      external: []
     encryption_key: '' # openssl rand -base64 32
     # Shared HMAC secret the relay uses to validate peer tokens.
     auth_secret: '' # openssl rand -base64 32

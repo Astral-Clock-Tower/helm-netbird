@@ -33,9 +33,11 @@ spec:
             - name: http
               containerPort: 80
               protocol: TCP
+            {{- if .Values.global.server.stun.enabled }}
             - name: stun
-              containerPort: 3478
+              containerPort: {{ include "netbird.stunPort" . }}
               protocol: UDP
+            {{- end }}
           args:
             - '--config'
             - '{{ .Values.server.persistence.configMountPath }}'
