@@ -79,31 +79,29 @@ spec:
 
 
 
+{{- with .Values.global.route.stunParentRefs }}
 ---
 apiVersion: gateway.networking.k8s.io/v1alpha2
 kind: UDPRoute
 metadata:
   name: {{ $fullName }}-stun
-  namespace: {{ .Values.global.namespace }}
+  namespace: {{ $.Values.global.namespace }}
   labels:
-    {{- include "netbird.labels" . | nindent 4 }}
-  {{- with .Values.global.route.annotations }}
+    {{- include "netbird.labels" $ | nindent 4 }}
+  {{- with $.Values.global.route.annotations }}
   annotations:
     {{- toYaml . | nindent 4 }}
   {{- end }}
 spec:
-  {{- with .Values.global.route.stunParentRefs }}
   parentRefs:
     {{- toYaml . | nindent 4 }}
-  {{- end }}
-  hostnames:
-    - '{{ .Values.global.domain.global }}'
   rules:
     - backendRefs:
         - group: ''
           kind: Service
           name: {{ $fullName }}-server
-          port: {{ .Values.global.server.stun_port }}
+          port: {{ $.Values.global.server.stun_port }}
+{{- end }}
 
 
 
