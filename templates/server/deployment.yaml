@@ -79,7 +79,7 @@ spec:
       volumes:
         - name: config
           secret:
-            secretName: {{ include "netbird.fullname" . }}-config
+            secretName: {{ include "netbird.configSecretName" . }}
         - name: {{ .Values.global.persistence.volumeName }}
           {{- if .Values.global.persistence.enabled }}
           persistentVolumeClaim:

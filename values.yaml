@@ -31,6 +31,31 @@ global:
     encryption_key: '' # openssl rand -base64 32
     # Shared HMAC secret the relay uses to validate peer tokens.
     auth_secret: '' # openssl rand -base64 32
+    # Name of an existing Secret holding the whole config.yaml under a
+    # `config.yaml` key, so the file can be managed by SOPS, External Secrets,
+    # Vault or sealed-secrets instead of by the values above.
+    #
+    # For the shape of that file, print the one this chart would have written
+    # and start from it:
+    #
+    #   helm template netbird . -s templates/secret.yaml \
+    #     --set global.domain.global=netbird.example.com \
+    #     --set global.server.encryption_key=... \
+    #     --set global.server.auth_secret=...
+    #
+    # Setting this stops these values reaching NetBird, so the chart fails the
+    # render rather than ignoring them: encryption_key, auth_secret,
+    # stun.external, auth.issuerUrl.
+    #
+    # These still apply, and your file has to agree with them:
+    #   port, stun.port  container ports, both Services, the probes and the
+    #                    route backends follow these. Match them to the
+    #                    listenAddress and stunPorts you set in your file.
+    #   stun.enabled     still gates that exposure; it just no longer writes
+    #                    stunPorts, which is now your file's business.
+    #   global.auth.*    configures the dashboard's environment (except
+    #                    issuerUrl, which is config-file only).
+    existingConfigSecret: ''
 
   persistence:
     enabled: true
