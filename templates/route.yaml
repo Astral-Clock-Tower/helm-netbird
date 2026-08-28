@@ -21,6 +21,23 @@ spec:
   hostnames:
     - {{ $host | quote }}
   rules:
+    # Streaming paths (/relay and /ws-proxy) must stay open forever.
+    # We use '0s' because any other timeout will force-close the connection.
+    - backendRefs:
+        - group: ''
+          kind: Service
+          name: {{ $fullName }}-server-http
+          port: {{ .Values.global.server.port }}
+      matches:
+        - path:
+            type: PathPrefix
+            value: /ws-proxy
+        - path:
+            type: PathPrefix
+            value: /relay
+      timeouts:
+        request: 0s
+    # Ordinary request/response API traffic.
     - backendRefs:
         - group: ''
           kind: Service
@@ -33,15 +50,9 @@ spec:
         - path:
             type: PathPrefix
             value: /oauth2
-        - path:
-            type: PathPrefix
-            value: /ws-proxy
-        - path:
-            type: PathPrefix
-            value: /relay
       timeouts:
-        request: 3600s
-        backendRequest: 3600s
+        request: {{ .Values.global.route.apiTimeout | default "3600s" }}
+        backendRequest: {{ .Values.global.route.apiTimeout | default "3600s" }}
 
 
 ---
@@ -170,6 +181,32 @@ spec:
 
 
 {{ if eq .Values.global.route.vendor "envoy" -}}
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: BackendTrafficPolicy
+metadata:
+  name: {{ $fullName }}-server-timeouts
+  namespace: {{ .Values.global.namespace | default .Release.Namespace }}
+spec:
+  targetRefs:
+    - group: 'gateway.networking.k8s.io'
+      kind: HTTPRoute
+      name: {{ $fullName }}-server
+  timeout:
+    http:
+      {{- /*
+      A BackendTrafficPolicy targets a whole route, so this applies to the
+      /relay and /ws-proxy rule too - and 86400s would have closed an idle relay
+      connection after a day, contradicting the `request: 0s` those paths are
+      given above. 0s disables the idle timeout; the tcpKeepalive below still
+      reaps genuinely dead peers in about five minutes.
+      */}}
+      connectionIdleTimeout: 0s
+  tcpKeepalive:
+    idleTime: 30s
+    interval: 30s
+    probes: 5
+
 ---
 apiVersion: gateway.envoyproxy.io/v1alpha1
 kind: BackendTrafficPolicy

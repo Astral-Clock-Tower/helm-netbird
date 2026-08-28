@@ -83,6 +83,9 @@ global:
     enabled: false
     vendor: ''
     parentRefs: []
+    # Timeout for regular API paths. Streaming paths (/relay, /ws-proxy) 
+    # always use 0s (unlimited) so they do not get disconnected.
+    apiTimeout: '3600s'
     # STUN likely uses a different port in the gateway, so you can specify a different parent ref here
     stunParentRefs: []
     annotations: {}
