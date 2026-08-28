@@ -18,6 +18,9 @@ metadata:
   namespace: {{ .Values.global.namespace }}
   labels:
     {{- include "netbird.labels" . | nindent 4 }}
+    {{- with .Values.global.persistence.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
   annotations:
     "helm.sh/resource-policy": keep
     {{- with .Values.global.persistence.annotations }}
@@ -36,5 +39,13 @@ spec:
   {{- end }}
   {{- if .Values.global.persistence.volumeMode }}
   volumeMode: {{ .Values.global.persistence.volumeMode | quote }}
+  {{- end }}
+  {{- with .Values.global.persistence.selector }}
+  selector:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.global.persistence.dataSource }}
+  dataSource:
+    {{- toYaml . | nindent 4 }}
   {{- end }}
 {{- end }}
