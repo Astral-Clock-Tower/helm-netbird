@@ -1,5 +1,6 @@
 {{- if .Values.global.route.enabled -}}
 {{- $fullName := include "netbird.fullname" . -}}
+{{- $host := required "global.domain.global is required when global.route.enabled is set: every route the chart renders uses it as its hostname." .Values.global.domain.global -}}
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -18,7 +19,7 @@ spec:
     {{- toYaml . | nindent 4 }}
   {{- end }}
   hostnames:
-    - {{ default .Values.global.domain.global  | quote }}
+    - {{ $host | quote }}
   rules:
     - backendRefs:
         - group: ''
@@ -61,7 +62,7 @@ spec:
     {{- toYaml . | nindent 4 }}
   {{- end }}
   hostnames:
-    - {{ default .Values.global.domain.global  | quote }}
+    - {{ $host | quote }}
   rules:
     - backendRefs:
         - group: ''
@@ -124,7 +125,7 @@ spec:
     {{- toYaml . | nindent 4 }}
   {{- end }}
   hostnames:
-    - {{ default .Values.global.domain.global  | quote }}
+    - {{ $host | quote }}
   rules:
     - backendRefs:
         - group: ''
@@ -156,7 +157,7 @@ spec:
     {{- toYaml . | nindent 4 }}
   {{- end }}
   hostnames:
-    - {{ default .Values.global.domain.global  | quote }}
+    - {{ $host | quote }}
   rules:
     - backendRefs:
         - group: ''
