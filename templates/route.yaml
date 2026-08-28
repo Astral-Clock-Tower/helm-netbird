@@ -24,7 +24,7 @@ spec:
     - backendRefs:
         - group: ''
           kind: Service
-          name: {{ $fullName }}-server
+          name: {{ $fullName }}-server-http
           port: {{ .Values.global.server.port }}
       matches:
         - path:
