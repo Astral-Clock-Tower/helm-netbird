@@ -8,6 +8,6 @@
           )))fffffffffffff))
             ffffffffffffff)           Further steps:
            )))ffffffffffff              - Be the first user to sign-in to ensure that your user account is the admin for the team.
-         )))))))ffffffff                - Ensure that the "{{ include "netbird.fullname" . }}-server" service is reachable at {{ .Values.global.domain.global }}:443 (and UDP {{ .Values.global.server.stun_port }}) from the internet.
+         )))))))ffffffff                - Ensure that the "{{ include "netbird.fullname" . }}-server" service is reachable at {{ .Values.global.domain.global }}:443 (and UDP {{ include "netbird.stunPort" . }}) from the internet.
         ))))))))))fffff
        )))))))))))))ff
