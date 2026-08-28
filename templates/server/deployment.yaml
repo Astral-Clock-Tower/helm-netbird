@@ -26,10 +26,18 @@ spec:
         {{- end }}
     spec:
       serviceAccountName: {{ include "netbird.serviceAccountName" . }}
+      {{- with .Values.server.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: server
           image: "{{ .Values.server.image.repository }}:{{ .Values.server.image.tag }}"
           imagePullPolicy: {{ .Values.server.image.pullPolicy }}
+          {{- with .Values.server.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           ports:
             - name: http
               containerPort: {{ .Values.global.server.port }}

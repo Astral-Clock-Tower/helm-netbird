@@ -26,10 +26,18 @@ spec:
         {{- end }}
     spec:
       serviceAccountName: {{ include "netbird.serviceAccountName" . }}
+      {{- with .Values.dashboard.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: dashboard
           image: "{{ .Values.dashboard.image.repository }}:{{ .Values.dashboard.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.dashboard.image.pullPolicy }}
+          {{- with .Values.dashboard.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           ports:
             - name: http
               containerPort: 80
