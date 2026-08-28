@@ -9,7 +9,8 @@ metadata:
   namespace: {{ .Values.global.namespace }}
   labels:
     {{- include "netbird.labels" . | nindent 4 }}
-  {{- with .Values.global.route.annotations }}
+  {{- $ann := merge (dict) (.Values.global.route.serverAnnotations | default dict) (.Values.global.route.annotations | default dict) }}
+  {{- with $ann }}
   annotations:
     {{- toYaml . | nindent 4 }}
   {{- end }}
@@ -63,7 +64,8 @@ metadata:
   namespace: {{ .Values.global.namespace }}
   labels:
     {{- include "netbird.labels" . | nindent 4 }}
-  {{- with .Values.global.route.annotations }}
+  {{- $ann := merge (dict) (.Values.global.route.dashboardAnnotations | default dict) (.Values.global.route.annotations | default dict) }}
+  {{- with $ann }}
   annotations:
     {{- toYaml . | nindent 4 }}
   {{- end }}
@@ -99,7 +101,8 @@ metadata:
   namespace: {{ $.Values.global.namespace }}
   labels:
     {{- include "netbird.labels" $ | nindent 4 }}
-  {{- with $.Values.global.route.annotations }}
+  {{- $ann := merge (dict) ($.Values.global.route.stunAnnotations | default dict) ($.Values.global.route.annotations | default dict) }}
+  {{- with $ann }}
   annotations:
     {{- toYaml . | nindent 4 }}
   {{- end }}
@@ -124,7 +127,8 @@ metadata:
   namespace: {{ .Values.global.namespace }}
   labels:
     {{- include "netbird.labels" . | nindent 4 }}
-  {{- with .Values.global.route.annotations }}
+  {{- $ann := merge (dict) (.Values.global.route.serverAnnotations | default dict) (.Values.global.route.annotations | default dict) }}
+  {{- with $ann }}
   annotations:
     {{- toYaml . | nindent 4 }}
   {{- end }}
@@ -156,7 +160,8 @@ metadata:
   namespace: {{ .Values.global.namespace }}
   labels:
     {{- include "netbird.labels" . | nindent 4 }}
-  {{- with .Values.global.route.annotations }}
+  {{- $ann := merge (dict) (.Values.global.route.serverAnnotations | default dict) (.Values.global.route.annotations | default dict) }}
+  {{- with $ann }}
   annotations:
     {{- toYaml . | nindent 4 }}
   {{- end }}

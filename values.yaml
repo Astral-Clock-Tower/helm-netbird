@@ -85,7 +85,14 @@ global:
     apiTimeout: '3600s'
     # STUN likely uses a different port in the gateway, so you can specify a different parent ref here
     stunParentRefs: []
+    # Applied to every route the chart renders.
     annotations: {}
+    # Merged over `annotations` for that route alone, so homepage or
+    # external-dns hints can go on the dashboard route without also landing
+    # on the API and gRPC routes.
+    dashboardAnnotations: {}
+    serverAnnotations: {}
+    stunAnnotations: {}
 
   # OIDC for the dashboard and the server. Set these to point at an external
   # provider (Zitadel, Authentik, Auth0, Keycloak).
