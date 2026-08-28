@@ -3,12 +3,17 @@
 # Declare variables to be passed into your templates.
 
 
+# Override the generated resource names. Consumed by templates/_helpers.tpl:
+# nameOverride replaces the chart name inside <release>-<chart>, fullnameOverride
+# replaces the whole thing.
+nameOverride: ''
+fullnameOverride: ''
+
 global:
   namespace: 'netbird'
   # Domain name used for access, ex netbird.example.com
   domain:
     global: '' # This is the only required domain.  The below ones are optional for if your network topology requires them.
-    vpn: ''  # This is the domain used internally by netbird for vpn clients.
   dashboard:
     port: 80
   server:
@@ -70,14 +75,6 @@ global:
     labels: {}
     selector: {}
     dataSource: {}
-    overrideVolume:
-    overrideVolumeMount:
-
-  ingress:
-    enabled: false
-    className: ''
-    annotations: {}
-    extra_hosts: []
 
   route:
     enabled: false
