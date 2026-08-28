@@ -90,6 +90,65 @@ global:
     stunParentRefs: []
     annotations: {}
 
+  # OIDC for the dashboard and the server. Set these to point at an external
+  # provider (Zitadel, Authentik, Auth0, Keycloak).
+  #
+  # Every value in this block defaults to the behaviour the chart had before
+  # the block existed, so an install that sets none of them renders exactly as
+  # it did before: this cannot break a deployment already using the chart.
+  #
+  # These cover both halves: `authority` and the client credentials configure
+  # the dashboard through its environment, while `issuerUrl` is written into
+  # the server's own config file as its `server.auth.issuer` field. Both must
+  # agree for an external IdP to work end to end - a dashboard pointed at a new
+  # provider while the server still expects the old issuer authenticates the
+  # user and then rejects the token.
+  auth:
+    # Issuer the SERVER validates tokens against, written into its config file
+    # as server.auth.issuer. Falls back to `authority` when unset, so pointing
+    # at an external IdP normally means setting `authority` alone and both
+    # halves follow. Set this only when the server must expect a different
+    # issuer from the URL the dashboard talks to.
+    issuerUrl: ''
+    # OIDC provider the DASHBOARD talks to (env AUTH_AUTHORITY).
+    authority: ''         # default: https://<domain.global>/oauth2
+    clientId: ''          # default: netbird-dashboard
+    audience: ''          # default: netbird-dashboard
+    # Prefer existingSecret over this; anything here is committed in plaintext.
+    clientSecret: ''
+    # Name of an existing Secret holding the OIDC client credentials. Overrides
+    # both values above, so neither has to be committed. A missing Secret or
+    # key fails at pod start with `couldn't find key ... in Secret ...` rather
+    # than silently - note that this is kubelet, not Helm, so the sync looks
+    # clean and the pod does not start.
+    #
+    # NOTE: the NetBird dashboard bakes AUTH_CLIENT_SECRET into its frontend JS
+    # and performs the token exchange from the browser, so this value reaches
+    # every visitor regardless (netbirdio/netbird#4188). Sourcing it from a
+    # Secret keeps it out of git; it does not make it confidential. Use a public
+    # client with PKCE where your IdP supports one.
+    existingSecret: ''
+    # Which keys to read inside existingSecret. The defaults are this chart's
+    # own names; override them when the Secret comes from something that names
+    # its keys differently - External Secrets templates and most IdP operators
+    # emit `client-id`/`client-secret`. Without these you need a second Secret
+    # that exists only to rename two keys.
+    existingSecretClientIdKey: 'clientId'
+    existingSecretClientSecretKey: 'clientSecret'
+    # A public client authenticates with PKCE and has no client secret, which
+    # is what the NOTE above recommends. Set this and the chart stops reading a
+    # client-secret key at all, so existingSecret does not have to carry an
+    # empty one purely to get the pod past CreateContainerConfigError.
+    publicClient: false
+    supportedScopes: ''   # default: openid profile email groups
+    # Paths the dashboard returns to after login. Both halves follow: the
+    # dashboard gets them as AUTH_REDIRECT_URI/AUTH_SILENT_REDIRECT_URI and the
+    # server advertises them under server.auth.dashboardRedirectURIs. They must
+    # be paths, not absolute URLs - the server prefixes the domain.
+    redirectURI: ''       # default: /nb-auth
+    silentRedirectURI: '' # default: /nb-silent-auth
+    useAuth0:             # default: false
+
   serviceAccount:
     create: true
     automount: true
@@ -98,6 +157,8 @@ global:
 
 
 dashboard:
+  # Additional env vars appended to the dashboard container.
+  extra_env: []
   image:
     repository: netbirdio/dashboard
     tag: v2.33.0

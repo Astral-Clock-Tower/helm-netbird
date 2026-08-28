@@ -40,25 +40,44 @@ spec:
             - name: NETBIRD_MGMT_GRPC_API_ENDPOINT
               value: "https://{{ .Values.global.domain.global }}:443"
             - name: AUTH_AUDIENCE
-              value: "netbird-dashboard"
+              value: {{ .Values.global.auth.audience | default "netbird-dashboard" | quote }}
             - name: AUTH_CLIENT_ID
-              value: "netbird-dashboard"
+            {{- if .Values.global.auth.existingSecret }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.global.auth.existingSecret }}
+                  key: {{ .Values.global.auth.existingSecretClientIdKey | default "clientId" }}
+            {{- else }}
+              value: {{ .Values.global.auth.clientId | default "netbird-dashboard" | quote }}
+            {{- end }}
             - name: AUTH_CLIENT_SECRET
+            {{- if .Values.global.auth.publicClient }}
               value: ""
+            {{- else if .Values.global.auth.existingSecret }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.global.auth.existingSecret }}
+                  key: {{ .Values.global.auth.existingSecretClientSecretKey | default "clientSecret" }}
+            {{- else }}
+              value: {{ .Values.global.auth.clientSecret | quote }}
+            {{- end }}
             - name: AUTH_AUTHORITY
-              value: "https://{{ .Values.global.domain.global }}/oauth2"
+              value: {{ .Values.global.auth.authority | default (printf "https://%s/oauth2" .Values.global.domain.global) | quote }}
             - name: USE_AUTH0
-              value: 'false'
+              value: '{{ .Values.global.auth.useAuth0 | default false }}'
             - name: AUTH_SUPPORTED_SCOPES
-              value: "openid profile email groups"
+              value: {{ .Values.global.auth.supportedScopes | default "openid profile email groups" | quote }}
             - name: AUTH_REDIRECT_URI
-              value: "/nb-auth"
+              value: {{ .Values.global.auth.redirectURI | default "/nb-auth" | quote }}
             - name: AUTH_SILENT_REDIRECT_URI
-              value: "/nb-silent-auth"
+              value: {{ .Values.global.auth.silentRedirectURI | default "/nb-silent-auth" | quote }}
             - name: NGINX_SSL_PORT
               value: "443"
             - name: LETSENCRYPT_DOMAIN
               value: "none"
+            {{- with .Values.dashboard.extra_env }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           livenessProbe:
             {{- if .Values.dashboard.livenessProbe }}
             {{- toYaml .Values.dashboard.livenessProbe | nindent 12 }}
