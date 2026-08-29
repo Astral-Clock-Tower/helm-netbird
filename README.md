@@ -7,6 +7,9 @@
 
 This chart provides a means of deploying Netbird to kubernetes.
 
+Upgrading, or coming from [cclloyd/helm-netbird](https://github.com/cclloyd/helm-netbird)?
+See [CHANGELOG.md](CHANGELOG.md).
+
 
 ---
 
