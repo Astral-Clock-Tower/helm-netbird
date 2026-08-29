@@ -8,6 +8,18 @@ metadata:
     netbird-app: {{ include "netbird.fullname" . }}-server
 spec:
   replicas: {{ .Values.server.replicaCount }}
+  {{- /*
+  Not RollingUpdate. The server keeps its state in a sqlite file on a single RWO
+  PVC, and every replica of this Deployment mounts the same claim - so a rolling
+  update either stalls (new pod scheduled to another node, the volume cannot
+  detach while the old pod holds it, and the old pod will not be evicted until
+  the new one is Ready) or, if both land on the same node, briefly runs two
+  servers writing one database. Recreate enforces what actually has to hold:
+  one writer at a time. It costs an outage the length of a pod restart on every
+  upgrade.
+  */}}
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       {{- include "netbird.selectorLabels" . | nindent 6 }}
