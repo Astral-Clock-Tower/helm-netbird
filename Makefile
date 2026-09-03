@@ -14,11 +14,15 @@ EXTRA ?=
 COMMON = --namespace $(NAMESPACE) $(VALUES_ARG) $(EXTRA)
 
 .DEFAULT_GOAL := help
-.PHONY: help deps template template-debug install diff-upgrade upgrade force-upgrade uninstall wipe status test test-reload
+.PHONY: help deps template template-debug install diff-upgrade upgrade force-upgrade uninstall wipe status lint render-check test test-reload assert-cluster
 
 help:
 	@echo 'Targets:'
+	@echo '  assert-cluster  lint -> render -> upgrade -> test -> test-reload'
+	@echo ''
 	@echo '  deps            helm dependency update + build'
+	@echo '  lint            helm lint with your values'
+	@echo '  render-check    render and discard: catches template errors without a cluster'
 	@echo '  template        render manifests to stdout'
 	@echo '  template-debug  render with --debug: prints computed values, and renders even on error'
 	@echo '  install         first install, creating the namespace'
@@ -34,6 +38,19 @@ help:
 	@echo 'Current values:'
 	@echo '  NAMESPACE=$(NAMESPACE)  RELEASE=$(RELEASE)  CHART=$(CHART)  TIMEOUT=$(TIMEOUT)'
 	@echo '  VALUES=$(VALUES) $(if $(wildcard $(VALUES)),(found),(absent -- cp values_example.yml values_local.yml))'
+
+assert-cluster: lint render-check upgrade test test-reload
+	@echo ''
+	@echo "assert-cluster passed; release left running in $(NAMESPACE)"
+
+lint:
+	@echo '== lint =='
+	@$(HELM) lint $(CHART) $(VALUES_ARG) $(EXTRA)
+
+render-check:
+	@echo '== render =='
+	@$(HELM) template $(RELEASE) $(CHART) $(COMMON) >/dev/null
+	@echo '  renders cleanly'
 
 deps:
 	$(HELM) dependency update $(CHART)
