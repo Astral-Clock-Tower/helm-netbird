@@ -5,9 +5,12 @@ env:
   GHCR_REGISTRY: ghcr.io
 
 on:
+  pull_request:
   push:
     tags:
       - 'v*'
+    branches:
+      - '**'
   workflow_dispatch:
 
 permissions:
@@ -19,7 +22,31 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: azure/setup-helm@v5
+
+      - name: Lint and render
+        run: |
+          set -euo pipefail
+          helm lint . \
+            --set global.domain.global=example.com \
+            --set global.server.encryption_key=dummy \
+            --set global.server.auth_secret=dummy
+          helm template t . \
+            --set global.domain.global=example.com \
+            --set global.server.encryption_key=dummy \
+            --set global.server.auth_secret=dummy > /dev/null
+
   publish:
+    needs: validate
+    # Branches publish snapshots so work in progress can be installed. main
+    # publishes nothing on its own - anything released from it is tagged, which
+    # takes the release path below. Pull requests publish nothing at all.
+    if: github.event_name != 'pull_request' && github.ref != 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -42,11 +69,22 @@ jobs:
               exit 1
             fi
 
-            release=true
+            kind=release
           else
-            version="$chart_version"
-            release=false
-            echo "Manual run: publishing 0.0.0-latest only, not ${version}."
+            # Immutable per-commit version, so a build can be pinned and
+            # rolled back to.
+            #
+            # A hyphen starts a prerelease, a dot extends one:
+            #   1.2.0      -> 1.2.0-snapshot.abc1234
+            #   2.0.0-rc.1 -> 2.0.0-rc.1.snapshot.abc1234
+            # Using a hyphen on the second gives 2.0.0-rc.1-snapshot.abc1234,
+            # which sorts above 2.0.0-rc.2.
+            case "$chart_version" in
+              *-*) version="${chart_version}.snapshot.${GITHUB_SHA:0:7}" ;;
+              *)   version="${chart_version}-snapshot.${GITHUB_SHA:0:7}" ;;
+            esac
+            kind=snapshot
+            echo "Snapshot build: ${version}"
           fi
 
           if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
@@ -55,19 +93,7 @@ jobs:
           fi
 
           printf 'VERSION=%s\n' "$version" >> "$GITHUB_ENV"
-          printf 'RELEASE=%s\n' "$release" >> "$GITHUB_ENV"
-
-      - name: Lint and render
-        run: |
-          set -euo pipefail
-          helm lint . \
-            --set global.domain.global=example.com \
-            --set global.server.encryption_key=dummy \
-            --set global.server.auth_secret=dummy
-          helm template t . \
-            --set global.domain.global=example.com \
-            --set global.server.encryption_key=dummy \
-            --set global.server.auth_secret=dummy > /dev/null
+          printf 'KIND=%s\n' "$kind" >> "$GITHUB_ENV"
 
       - name: Package
         run: |
@@ -75,11 +101,10 @@ jobs:
           mkdir -p packages
           # --version sets the version inside the package and leaves Chart.yaml
           # on disk alone, so no edit-and-restore is needed.
-          if [ "${RELEASE}" = "true" ]; then
-            helm package . --version "${VERSION}" --destination packages
-          fi
-          # Moving tag, so `targetRevision: 0.0.0-latest` tracks the newest build.
-          helm package . --version "0.0.0-latest" --destination packages
+          #
+          # VERSION is immutable either way now - a release tag or a
+          # commit-derived snapshot - so it is always worth publishing.
+          helm package . --version "${VERSION}" --destination packages
 
       - name: Log in to GHCR
         env:
@@ -102,20 +127,13 @@ jobs:
           repo="$(basename "${REPO_FULL}")"
           dest="oci://${GHCR_REGISTRY}/${owner}/${repo}"
 
-          versions=("0.0.0-latest")
-          if [ "${RELEASE}" = "true" ]; then
-            versions=("${VERSION}" "${versions[@]}")
-          fi
+          tgz="packages/${CHART_NAME}-${VERSION}.tgz"
+          [ -f "$tgz" ] || { echo "::error::$tgz not found"; exit 1; }
+          helm push "$tgz" "$dest"
 
-          for v in "${versions[@]}"; do
-            tgz="packages/${CHART_NAME}-${v}.tgz"
-            [ -f "$tgz" ] || { echo "::error::$tgz not found"; exit 1; }
-            helm push "$tgz" "$dest"
-          done
-
-          echo "### Published" >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
-          for v in "${versions[@]}"; do
-            echo "${dest}/${CHART_NAME}:${v}" >> "$GITHUB_STEP_SUMMARY"
-          done
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "### Published (${KIND})"
+            echo '```'
+            echo "${dest}/${CHART_NAME}:${VERSION}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
