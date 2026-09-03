@@ -32,6 +32,24 @@ global:
       # Additional external STUN servers to advertise to peers (stuns), ex
       # ['stun:stun.l.google.com:19302'].
       external: []
+    # Prometheus metrics. NetBird serves them unconditionally; `port` is what
+    # goes into the config as metricsPort, and `exposed` only controls whether
+    # the chart publishes that port as a container port and on the
+    # <release>-server-http Service so something can scrape it. It is never
+    # routed through the gateway.
+    metrics:
+      port: 9090
+      exposed: true
+
+    # NetBird also starts a gRPC listener on 33073 for peers older than v0.29,
+    # which cannot use the consolidated port. It starts whether or not this is
+    # set - the chart cannot turn it off - so this only controls whether the
+    # port is published for those peers to reach. Leave it off unless you know
+    # you have pre-v0.29 peers.
+    legacyGrpc:
+      port: 33073
+      exposed: false
+
     encryption_key: '' # openssl rand -base64 32
     # Shared HMAC secret the relay uses to validate peer tokens.
     auth_secret: '' # openssl rand -base64 32
@@ -194,6 +212,11 @@ dashboard:
     tag: v2.39.0
     pullPolicy: IfNotPresent
   annotations: {}
+  # Annotations on the Deployment object itself, as opposed to `annotations`
+  # above, which land on the pod template. Operators that watch workloads read
+  # these - Reloader's `reloader.stakater.com/auto: "true"` belongs here, not
+  # on the pod.
+  deploymentAnnotations: {}
   labels: {}
   nodeSelector: {}
   tolerations: []
@@ -218,6 +241,11 @@ server:
     tag: 0.77.1
     pullPolicy: IfNotPresent
   annotations: {}
+  # Annotations on the Deployment object itself, as opposed to `annotations`
+  # above, which land on the pod template. Operators that watch workloads read
+  # these - Reloader's `reloader.stakater.com/auto: "true"` belongs here, not
+  # on the pod.
+  deploymentAnnotations: {}
   labels: {}
   nodeSelector: {}
   tolerations: []
@@ -235,6 +263,15 @@ server:
   extra_volumes: []
   extra_volumeMounts: []
   extra_args: []
+  # Hash the rendered config into the pod template, so that changing any value
+  # that ends up in config.yaml rolls the pod. Without it nothing does: the file
+  # is mounted with subPath, which never receives Secret updates, so the running
+  # server keeps the config it started with and the upgrade looks successful.
+  #
+  # Turn it off if an operator such as Reloader watches the Secret instead, and
+  # point that operator at the Deployment with `server.deploymentAnnotations`.
+  # Leaving both on restarts the pod twice for one change.
+  reloadOnConfigChange: true
   persistence:
     dataDir: /var/lib/netbird
     mountPath: /var/lib/netbird

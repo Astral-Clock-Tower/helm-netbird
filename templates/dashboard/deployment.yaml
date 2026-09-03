@@ -6,6 +6,19 @@ metadata:
   labels:
     {{- include "netbird.labels" . | nindent 4 }}
     netbird-app: {{ include "netbird.fullname" . }}-dashboard
+  {{- with .Values.dashboard.deploymentAnnotations }}
+  annotations:
+    {{- /*
+    Quoted rather than toYaml'd: annotation values must be strings, and the
+    canonical value here is `reloader.stakater.com/auto: "true"`, which YAML
+    reads as a boolean unless the author remembers the quotes. Unquoted it is
+    rejected at apply time with "cannot unmarshal bool into ... annotations of
+    type string", which does not name the annotation that caused it.
+    */}}
+    {{- range $k, $v := . }}
+    {{ $k | quote }}: {{ $v | quote }}
+    {{- end }}
+  {{- end }}
 spec:
   replicas: {{ .Values.dashboard.replicaCount }}
   selector:

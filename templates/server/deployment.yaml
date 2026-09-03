@@ -6,6 +6,19 @@ metadata:
   labels:
     {{- include "netbird.labels" . | nindent 4 }}
     netbird-app: {{ include "netbird.fullname" . }}-server
+  {{- with .Values.server.deploymentAnnotations }}
+  annotations:
+    {{- /*
+    Quoted rather than toYaml'd: annotation values must be strings, and the
+    canonical value here is `reloader.stakater.com/auto: "true"`, which YAML
+    reads as a boolean unless the author remembers the quotes. Unquoted it is
+    rejected at apply time with "cannot unmarshal bool into ... annotations of
+    type string", which does not name the annotation that caused it.
+    */}}
+    {{- range $k, $v := . }}
+    {{ $k | quote }}: {{ $v | quote }}
+    {{- end }}
+  {{- end }}
 spec:
   replicas: {{ .Values.server.replicaCount }}
   {{- /*
@@ -34,11 +47,14 @@ spec:
       the rendered Secret rolls the Deployment exactly when the config differs.
 
       Skipped when the config comes from existingConfigSecret: the chart cannot
-      read that Secret at render time, so there is nothing to hash. Changing it
-      needs a manual `kubectl rollout restart`.
+      read that Secret at render time, so there is nothing to hash.
+
+      Also skippable with server.reloadOnConfigChange, for clusters where an
+      operator such as Reloader watches the Secret instead: it wants a stable
+      pod template, and with both active the pod restarts twice per change.
       */ -}}
       {{- $ann := .Values.server.annotations | default dict }}
-      {{- if not .Values.global.server.existingConfigSecret }}
+      {{- if and .Values.server.reloadOnConfigChange (not .Values.global.server.existingConfigSecret) }}
       {{- $ann = merge (dict "checksum/config" (include (print $.Template.BasePath "/secret.yaml") . | sha256sum)) $ann }}
       {{- end }}
       {{- with $ann }}
@@ -73,6 +89,16 @@ spec:
             - name: stun
               containerPort: {{ include "netbird.stunPort" . }}
               protocol: UDP
+            {{- end }}
+            {{- if .Values.global.server.metrics.exposed }}
+            - name: metrics
+              containerPort: {{ .Values.global.server.metrics.port | default 9090 }}
+              protocol: TCP
+            {{- end }}
+            {{- if .Values.global.server.legacyGrpc.exposed }}
+            - name: legacy-grpc
+              containerPort: {{ .Values.global.server.legacyGrpc.port | default 33073 }}
+              protocol: TCP
             {{- end }}
           args:
             - '--config'

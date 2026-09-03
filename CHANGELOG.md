@@ -85,6 +85,27 @@ Diverges from cclloyd/helm-netbird 1.2.0.
   CIDR. Setting `trustedPeers` also clears NetBird's boot warning that the
   default allows connection IP spoofing.
 
+- `global.server.metrics.port` / `.exposed` - the metrics port was hardcoded to
+  9090 in the config and published nowhere, so nothing could scrape it. Now
+  configurable and, by default, published as a container port and on the
+  `-server-http` Service. That is a ClusterIP, and no route points at the
+  metrics port, so it stays reachable only from inside the cluster.
+
+- `global.server.legacyGrpc.port` / `.exposed` - NetBird starts a gRPC listener
+  on 33073 for peers older than v0.29 whether or not you want it; the chart can
+  now publish that port. Off by default, since anything from v0.29 on uses the
+  consolidated port.
+
+- `server.deploymentAnnotations` and `dashboard.deploymentAnnotations` -
+  custom annotations on the Deployment object. `annotations` only ever reached
+  the pod template, so anything that reads the workload object itself could not
+  be set through this chart. Values are coerced to strings, so a bare `true` is
+  not rejected as a boolean at apply time.
+
+- `server.reloadOnConfigChange` (default `true`) - whether to emit the
+  `checksum/config` annotation described above. Turn it off if something else
+  is responsible for restarting the pod when the config changes.
+
 - `global.route.apiTimeout`, pod and container `securityContext` on both
   components, `dashboard.extra_env`.
 

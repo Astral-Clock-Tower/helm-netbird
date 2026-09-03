@@ -65,6 +65,10 @@ To use the minimal setup, you will require
 | global.dashboard.port             | Dashboard HTTP port                                                                                  | `80`                     |
 | global.server.port                | Server HTTP port                                                                                     | `80`                     |
 | global.server.stun_port           | Server STUN port                                                                                     | `3478`                   |
+| global.server.metrics.port        | Port NetBird serves Prometheus metrics on (config `metricsPort`)                                     | `9090`                   |
+| global.server.metrics.exposed     | Publish that port as a container port and on the `-server-http` Service                              | `true`                   |
+| global.server.legacyGrpc.port     | Port of NetBird's gRPC listener for pre-v0.29 peers                                                  | `33073`                  |
+| global.server.legacyGrpc.exposed  | Publish that port.  Only needed if you have pre-v0.29 peers                                          | `false`                  |
 | global.server.stun.enabled        | Serve STUN from the server pod: config `stunPorts`, container port, Service port and UDPRoute        | `true`                   |
 | global.server.stun.port           | Server STUN port.  Overrides `stun_port` when set.                                                   | `<global.server.stun_port>` |
 | global.server.stun.external       | External STUN servers to advertise to peers, eg `['stun:stun.l.google.com:19302']`                   | `[]`                     |
@@ -122,6 +126,7 @@ To use the minimal setup, you will require
 | dashboard.image.tag                | Dashboard image tag        | `'v2.39.0'`                  |
 | dashboard.image.pullPolicy         | Image pull policy          | `'IfNotPresent'`             |
 | dashboard.annotations              | Pod annotations            | `{}`                         |
+| dashboard.deploymentAnnotations    | Deployment-object annotations (Reloader etc.) | `{}`      |
 | dashboard.labels                   | Pod labels                 | `{}`                         |
 | dashboard.nodeSelector             | Node selector              | `{}`                         |
 | dashboard.tolerations              | Tolerations array          | `[]`                         |
@@ -142,6 +147,8 @@ To use the minimal setup, you will require
 | server.image.tag                   | Server image tag           | `'0.77.1'`                   |
 | server.image.pullPolicy            | Image pull policy          | `'IfNotPresent'`             |
 | server.annotations                 | Pod annotations            | `{}`                         |
+| server.deploymentAnnotations       | Deployment-object annotations (Reloader etc.) | `{}`      |
+| server.reloadOnConfigChange        | Roll the pod when config.yaml changes | `true`             |
 | server.labels                      | Pod labels                 | `{}`                         |
 | server.nodeSelector                | Node selector              | `{}`                         |
 | server.tolerations                 | Tolerations                | `[]`                         |
