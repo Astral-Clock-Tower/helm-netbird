@@ -42,6 +42,17 @@ Diverges from cclloyd/helm-netbird 1.2.0.
   so nothing relocates; migrate deliberately, with a volume snapshot, if you
   want them somewhere else.
 
+- **The server Deployment carries a `checksum/config` annotation.** Every
+  install gains one pod-template field, so the first upgrade to 2.0.0 rolls the
+  server pod once. Without it a config change never reached the container:
+  `config.yaml` is mounted with `subPath`, which never receives Secret updates,
+  and nothing else in the pod template changed - so `helm upgrade` reported
+  success while the running server kept the config it started with. Rotating
+  `encryption_key`, `auth_secret` or any OIDC setting was silently a no-op
+  until someone restarted the pod by hand. Not applied when
+  `existingConfigSecret` is set, since the chart cannot read that Secret to
+  hash it; changing that one still needs `kubectl rollout restart`.
+
 - **The server Deployment uses `strategy: Recreate`.** Upgrades now stop the
   old pod before starting the new one, so they take a short outage instead of
   risking two servers on one sqlite file.

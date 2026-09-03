@@ -26,7 +26,22 @@ spec:
       netbird-app: {{ include "netbird.fullname" . }}-server
   template:
     metadata:
-      {{- with .Values.server.annotations }}
+      {{- /*
+      config.yaml is mounted with subPath, and a subPath mount never receives
+      updates from its Secret - so without something changing the pod template,
+      a config change leaves the running container reading whatever it started
+      with and `helm upgrade` reports success having altered nothing. Hashing
+      the rendered Secret rolls the Deployment exactly when the config differs.
+
+      Skipped when the config comes from existingConfigSecret: the chart cannot
+      read that Secret at render time, so there is nothing to hash. Changing it
+      needs a manual `kubectl rollout restart`.
+      */ -}}
+      {{- $ann := .Values.server.annotations | default dict }}
+      {{- if not .Values.global.server.existingConfigSecret }}
+      {{- $ann = merge (dict "checksum/config" (include (print $.Template.BasePath "/secret.yaml") . | sha256sum)) $ann }}
+      {{- end }}
+      {{- with $ann }}
       annotations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
