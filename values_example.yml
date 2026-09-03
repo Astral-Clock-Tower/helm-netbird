@@ -28,6 +28,27 @@ global:
     encryption_key: 'REPLACE-ME-openssl-rand-base64-32'
     auth_secret: 'REPLACE-ME-openssl-rand-base64-32'
 
+    # Passed straight through to NetBird's reverseProxy config block. Any field
+    # left empty is dropped from the file, so NetBird's own default applies.
+    reverseProxy:
+      # Which sources may set X-Forwarded-For. The chart default is 0.0.0.0/0
+      # - trust it from anywhere - so anything that can reach the pod directly
+      # can claim any client IP. Narrow it to the pod CIDR your gateway runs
+      # in; `kubectl get nodes -o jsonpath='{.items[*].spec.podCIDR}'` will
+      # tell you what that is.
+      trustedHTTPProxies:
+        - '10.0.0.0/8'
+      # Peer networks whose forwarded headers are trusted. NetBird defaults
+      # this to 0.0.0.0/0 and ::/0 and warns at boot that it allows connection
+      # IP spoofing; 100.64.0.0/10 is the usual self-hosted peer range.
+      trustedPeers:
+        - '100.64.0.0/10'
+      # Alternative to trustedHTTPProxies: how many proxies sit in front of the
+      # server, counted from the right of X-Forwarded-For. Set one or the other.
+      # trustedHTTPProxiesCount: 1
+      # accessLogRetentionDays: 7
+      # accessLogCleanupIntervalHours: 24
+
   route:
     enabled: true
     # 'envoy' additionally installs the BackendTrafficPolicy objects that stop
