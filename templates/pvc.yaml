@@ -3,8 +3,25 @@
 {{- $volumeName := .Values.global.persistence.volumeName -}}
 {{- $pvcName := printf "%s-%s" $fullName $volumeName -}}
 
+{{- /*
+Deploying through ArgoCD, Flux, or anything else that renders with
+`helm template`? Set global.persistence.storageClass explicitly.
+
+storageClassName is immutable once the PVC exists, so when storageClass is
+unset the block below reuses the class the live PVC already has and an
+upgrade never tries to change it. It finds that class with `lookup`, which
+needs a real connection to the cluster and returns nothing under
+`helm template`. Under GitOps the fallback therefore never fires: the PVC
+renders with no storageClassName and the cluster default decides at
+creation time, whatever that happens to be.
+
+"Unset" is tested as nil rather than by truthiness, because storageClassName:
+"" is how Kubernetes is told to skip dynamic provisioning and bind a
+pre-created PV. An explicit "" has to survive down to the manifest instead of
+collapsing into the same case as unset.
+*/ -}}
 {{- $storageClass := .Values.global.persistence.storageClass -}}
-{{- if not $storageClass -}}
+{{- if kindIs "invalid" $storageClass -}}
   {{- $existing := lookup "v1" "PersistentVolumeClaim" .Release.Namespace $pvcName -}}
   {{- if and $existing $existing.spec $existing.spec.storageClassName -}}
     {{- $storageClass = $existing.spec.storageClassName -}}
@@ -15,9 +32,12 @@ apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: {{ $pvcName }}
-  namespace: {{ .Values.global.namespace }}
+  namespace: {{ .Release.Namespace }}
   labels:
     {{- include "netbird.labels" . | nindent 4 }}
+    {{- with .Values.global.persistence.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
   annotations:
     "helm.sh/resource-policy": keep
     {{- with .Values.global.persistence.annotations }}
@@ -31,10 +51,18 @@ spec:
   resources:
     requests:
       storage: {{ .Values.global.persistence.size | quote }}
-  {{- if $storageClass }}
+  {{- if not (kindIs "invalid" $storageClass) }}
   storageClassName: {{ $storageClass | quote }}
   {{- end }}
   {{- if .Values.global.persistence.volumeMode }}
   volumeMode: {{ .Values.global.persistence.volumeMode | quote }}
+  {{- end }}
+  {{- with .Values.global.persistence.selector }}
+  selector:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.global.persistence.dataSource }}
+  dataSource:
+    {{- toYaml . | nindent 4 }}
   {{- end }}
 {{- end }}

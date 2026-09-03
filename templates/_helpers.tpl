@@ -60,3 +60,15 @@ Create the name of the service account to use
 {{- default "default" .Values.global.serviceAccount.name }}
 {{- end }}
 {{- end }}
+
+{{- define "netbird.stunPort" -}}
+{{- .Values.global.server.stun.port | default .Values.global.server.stun_port | default 3478 }}
+{{- end }}
+
+{{/*
+Name of the Secret holding config.yaml. Defaults to the chart-managed Secret,
+or the user-supplied one when global.server.existingConfigSecret is set.
+*/}}
+{{- define "netbird.configSecretName" -}}
+{{- default (printf "%s-config" (include "netbird.fullname" .)) .Values.global.server.existingConfigSecret }}
+{{- end }}

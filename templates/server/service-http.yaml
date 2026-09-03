@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ include "netbird.fullname" . }}-server
+  name: {{ include "netbird.fullname" . }}-server-http
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "netbird.labels" . | nindent 4 }}
@@ -16,13 +16,19 @@ spec:
     - name: http
       targetPort: http
       protocol: TCP
-      appProtocol: kubernetes.io/h2c
       port: {{ .Values.global.server.port }}
-{{- if .Values.global.server.stun.enabled }}
-    - name: stun
-      targetPort: stun
-      protocol: UDP
-      port: {{ include "netbird.stunPort" . }}
+{{- if .Values.global.server.metrics.exposed }}
+    - name: metrics
+      targetPort: metrics
+      protocol: TCP
+      port: {{ .Values.global.server.metrics.port | default 9090 }}
+{{- end }}
+{{- if .Values.global.server.legacyGrpc.exposed }}
+    - name: legacy-grpc
+      targetPort: legacy-grpc
+      protocol: TCP
+      appProtocol: kubernetes.io/h2c
+      port: {{ .Values.global.server.legacyGrpc.port | default 33073 }}
 {{- end }}
   selector:
     {{- include "netbird.selectorLabels" . | nindent 4 }}

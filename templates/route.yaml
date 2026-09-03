@@ -1,14 +1,16 @@
 {{- if .Values.global.route.enabled -}}
 {{- $fullName := include "netbird.fullname" . -}}
+{{- $host := required "global.domain.global is required when global.route.enabled is set: every route the chart renders uses it as its hostname." .Values.global.domain.global -}}
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
   name: {{ $fullName }}-server
-  namespace: {{ .Values.global.namespace }}
+  namespace: {{ .Release.Namespace }}
   labels:
     {{- include "netbird.labels" . | nindent 4 }}
-  {{- with .Values.global.route.annotations }}
+  {{- $ann := merge (dict) (.Values.global.route.serverAnnotations | default dict) (.Values.global.route.annotations | default dict) }}
+  {{- with $ann }}
   annotations:
     {{- toYaml . | nindent 4 }}
   {{- end }}
@@ -18,12 +20,29 @@ spec:
     {{- toYaml . | nindent 4 }}
   {{- end }}
   hostnames:
-    - {{ default .Values.global.domain.global  | quote }}
+    - {{ $host | quote }}
   rules:
+    # Streaming paths (/relay and /ws-proxy) must stay open forever.
+    # We use '0s' because any other timeout will force-close the connection.
     - backendRefs:
         - group: ''
           kind: Service
-          name: {{ $fullName }}-server
+          name: {{ $fullName }}-server-http
+          port: {{ .Values.global.server.port }}
+      matches:
+        - path:
+            type: PathPrefix
+            value: /ws-proxy
+        - path:
+            type: PathPrefix
+            value: /relay
+      timeouts:
+        request: 0s
+    # Ordinary request/response API traffic.
+    - backendRefs:
+        - group: ''
+          kind: Service
+          name: {{ $fullName }}-server-http
           port: {{ .Values.global.server.port }}
       matches:
         - path:
@@ -32,15 +51,9 @@ spec:
         - path:
             type: PathPrefix
             value: /oauth2
-        - path:
-            type: PathPrefix
-            value: /ws-proxy
-        - path:
-            type: PathPrefix
-            value: /relay
       timeouts:
-        request: 3600s
-        backendRequest: 3600s
+        request: {{ .Values.global.route.apiTimeout | default "3600s" }}
+        backendRequest: {{ .Values.global.route.apiTimeout | default "3600s" }}
 
 
 ---
@@ -48,10 +61,11 @@ apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
   name: {{ $fullName }}-dashboard
-  namespace: {{ .Values.global.namespace }}
+  namespace: {{ .Release.Namespace }}
   labels:
     {{- include "netbird.labels" . | nindent 4 }}
-  {{- with .Values.global.route.annotations }}
+  {{- $ann := merge (dict) (.Values.global.route.dashboardAnnotations | default dict) (.Values.global.route.annotations | default dict) }}
+  {{- with $ann }}
   annotations:
     {{- toYaml . | nindent 4 }}
   {{- end }}
@@ -61,7 +75,7 @@ spec:
     {{- toYaml . | nindent 4 }}
   {{- end }}
   hostnames:
-    - {{ default .Values.global.domain.global  | quote }}
+    - {{ $host | quote }}
   rules:
     - backendRefs:
         - group: ''
@@ -78,31 +92,30 @@ spec:
 
 
 
+{{- if and .Values.global.server.stun.enabled .Values.global.route.stunParentRefs }}
 ---
 apiVersion: gateway.networking.k8s.io/v1alpha2
 kind: UDPRoute
 metadata:
   name: {{ $fullName }}-stun
-  namespace: {{ .Values.global.namespace }}
+  namespace: {{ $.Release.Namespace }}
   labels:
-    {{- include "netbird.labels" . | nindent 4 }}
-  {{- with .Values.global.route.annotations }}
+    {{- include "netbird.labels" $ | nindent 4 }}
+  {{- $ann := merge (dict) ($.Values.global.route.stunAnnotations | default dict) ($.Values.global.route.annotations | default dict) }}
+  {{- with $ann }}
   annotations:
     {{- toYaml . | nindent 4 }}
   {{- end }}
 spec:
-  {{- with .Values.global.route.stunParentRefs }}
   parentRefs:
-    {{- toYaml . | nindent 4 }}
-  {{- end }}
-  hostnames:
-    - '{{ .Values.global.domain.global }}'
+    {{- toYaml .Values.global.route.stunParentRefs | nindent 4 }}
   rules:
     - backendRefs:
         - group: ''
           kind: Service
           name: {{ $fullName }}-server
-          port: {{ .Values.global.server.stun_port }}
+          port: {{ include "netbird.stunPort" $ }}
+{{- end }}
 
 
 
@@ -111,10 +124,11 @@ apiVersion: gateway.networking.k8s.io/v1
 kind: GRPCRoute
 metadata:
   name: {{ $fullName }}-server-management
-  namespace: {{ .Values.global.namespace }}
+  namespace: {{ .Release.Namespace }}
   labels:
     {{- include "netbird.labels" . | nindent 4 }}
-  {{- with .Values.global.route.annotations }}
+  {{- $ann := merge (dict) (.Values.global.route.serverAnnotations | default dict) (.Values.global.route.annotations | default dict) }}
+  {{- with $ann }}
   annotations:
     {{- toYaml . | nindent 4 }}
   {{- end }}
@@ -124,7 +138,7 @@ spec:
     {{- toYaml . | nindent 4 }}
   {{- end }}
   hostnames:
-    - {{ default .Values.global.domain.global  | quote }}
+    - {{ $host | quote }}
   rules:
     - backendRefs:
         - group: ''
@@ -143,10 +157,11 @@ apiVersion: gateway.networking.k8s.io/v1
 kind: GRPCRoute
 metadata:
   name: {{ $fullName }}-server-signal
-  namespace: {{ .Values.global.namespace }}
+  namespace: {{ .Release.Namespace }}
   labels:
     {{- include "netbird.labels" . | nindent 4 }}
-  {{- with .Values.global.route.annotations }}
+  {{- $ann := merge (dict) (.Values.global.route.serverAnnotations | default dict) (.Values.global.route.annotations | default dict) }}
+  {{- with $ann }}
   annotations:
     {{- toYaml . | nindent 4 }}
   {{- end }}
@@ -156,7 +171,7 @@ spec:
     {{- toYaml . | nindent 4 }}
   {{- end }}
   hostnames:
-    - {{ default .Values.global.domain.global  | quote }}
+    - {{ $host | quote }}
   rules:
     - backendRefs:
         - group: ''
@@ -175,8 +190,34 @@ spec:
 apiVersion: gateway.envoyproxy.io/v1alpha1
 kind: BackendTrafficPolicy
 metadata:
+  name: {{ $fullName }}-server-timeouts
+  namespace: {{ .Release.Namespace }}
+spec:
+  targetRefs:
+    - group: 'gateway.networking.k8s.io'
+      kind: HTTPRoute
+      name: {{ $fullName }}-server
+  timeout:
+    http:
+      {{- /*
+      A BackendTrafficPolicy targets a whole route, so this applies to the
+      /relay and /ws-proxy rule too - and 86400s would have closed an idle relay
+      connection after a day, contradicting the `request: 0s` those paths are
+      given above. 0s disables the idle timeout; the tcpKeepalive below still
+      reaps genuinely dead peers in about five minutes.
+      */}}
+      connectionIdleTimeout: 0s
+  tcpKeepalive:
+    idleTime: 30s
+    interval: 30s
+    probes: 5
+
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: BackendTrafficPolicy
+metadata:
   name: {{ $fullName }}-server-management-timeouts
-  namespace: ecumene
+  namespace: {{ .Release.Namespace }}
 spec:
   targetRefs:
     - group: 'gateway.networking.k8s.io'
@@ -196,7 +237,7 @@ apiVersion: gateway.envoyproxy.io/v1alpha1
 kind: BackendTrafficPolicy
 metadata:
   name: {{ $fullName }}-server-signal-timeouts
-  namespace: ecumene
+  namespace: {{ .Release.Namespace }}
 spec:
   targetRefs:
     - group: 'gateway.networking.k8s.io'

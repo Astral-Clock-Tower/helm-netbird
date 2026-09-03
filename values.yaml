@@ -3,21 +3,111 @@
 # Declare variables to be passed into your templates.
 
 
+# Override the generated resource names. Consumed by templates/_helpers.tpl:
+# nameOverride replaces the chart name inside <release>-<chart>, fullnameOverride
+# replaces the whole thing.
+nameOverride: ''
+fullnameOverride: ''
+
 global:
-  namespace: 'netbird'
   # Domain name used for access, ex netbird.example.com
   domain:
     global: '' # This is the only required domain.  The below ones are optional for if your network topology requires them.
-    vpn: ''  # This is the domain used internally by netbird for vpn clients.
   dashboard:
     port: 80
   server:
     port: 80
+    # DEPRECATED: use global.server.stun.port. Still the source of the default
+    # so that existing installs overriding this keep working.
     stun_port: 3478
+    stun:
+      # Serve STUN from the server pod. This advertises the port in the config
+      # (stunPorts) AND exposes it: the container port, the UDP port on the
+      # server Service, and the UDPRoute all follow it. Turn it off when peers
+      # reach STUN somewhere else (see `external` below) so the chart stops
+      # opening a port nothing is listening on.
+      enabled: true
+      # Overrides stun_port when set.
+      port:
+      # Additional external STUN servers to advertise to peers (stuns), ex
+      # ['stun:stun.l.google.com:19302'].
+      external: []
+    # Prometheus metrics. NetBird serves them unconditionally; `port` is what
+    # goes into the config as metricsPort, and `exposed` only controls whether
+    # the chart publishes that port as a container port and on the
+    # <release>-server-http Service so something can scrape it. It is never
+    # routed through the gateway.
+    metrics:
+      port: 9090
+      exposed: true
+
+    # NetBird also starts a gRPC listener on 33073 for peers older than v0.29,
+    # which cannot use the consolidated port. It starts whether or not this is
+    # set - the chart cannot turn it off - so this only controls whether the
+    # port is published for those peers to reach. Leave it off unless you know
+    # you have pre-v0.29 peers.
+    legacyGrpc:
+      port: 33073
+      exposed: false
+
     encryption_key: '' # openssl rand -base64 32
+    # Shared HMAC secret the relay uses to validate peer tokens.
+    auth_secret: '' # openssl rand -base64 32
+    # Passed through to the server's `reverseProxy` config block, key for key.
+    # Anything left empty is omitted from the file entirely, so NetBird's own
+    # default applies rather than a zero value overwriting it.
+    reverseProxy:
+      # CIDRs whose X-Forwarded-For the server will believe when working out a
+      # client's real IP. 0.0.0.0/0 is what this chart has always sent, and it
+      # means "trust that header from anywhere" - anyone able to reach the
+      # server directly can claim any source IP. Narrow it to the pod CIDR your
+      # gateway runs in once you know it.
+      trustedHTTPProxies:
+        - '0.0.0.0/0'
+      # Alternative to the list above: how many proxies sit in front of the
+      # server, counted from the right of X-Forwarded-For. Set one or the other.
+      trustedHTTPProxiesCount:
+      # CIDRs of peer networks whose forwarded headers are trusted, eg
+      # ['100.64.0.0/10']. Left empty NetBird defaults it to 0.0.0.0/0 and
+      # ::/0 and warns at boot that this allows connection IP spoofing.
+      trustedPeers: []
+      # Days to keep HTTP access logs, and how often the cleanup runs.
+      accessLogRetentionDays:
+      accessLogCleanupIntervalHours:
+
+    # Name of an existing Secret holding the whole config.yaml under a
+    # `config.yaml` key, so the file can be managed by SOPS, External Secrets,
+    # Vault or sealed-secrets instead of by the values above.
+    #
+    # For the shape of that file, print the one this chart would have written
+    # and start from it:
+    #
+    #   helm template netbird . -s templates/secret.yaml \
+    #     --set global.domain.global=netbird.example.com \
+    #     --set global.server.encryption_key=... \
+    #     --set global.server.auth_secret=...
+    #
+    # Setting this stops these values reaching NetBird, so the chart fails the
+    # render rather than ignoring them: encryption_key, auth_secret,
+    # stun.external, auth.issuerUrl.
+    #
+    # These still apply, and your file has to agree with them:
+    #   port, stun.port  container ports, both Services, the probes and the
+    #                    route backends follow these. Match them to the
+    #                    listenAddress and stunPorts you set in your file.
+    #   stun.enabled     still gates that exposure; it just no longer writes
+    #                    stunPorts, which is now your file's business.
+    #   global.auth.*    configures the dashboard's environment (except
+    #                    issuerUrl, which is config-file only).
+    existingConfigSecret: ''
 
   persistence:
     enabled: true
+    # Set this explicitly under GitOps: the fallback that reuses an existing
+    # PVC's class relies on `lookup`, which is inert under `helm template`.
+    # Leave it unset for "let the cluster default decide"; set it to the empty
+    # string for "no dynamic provisioning, bind a PV I created myself". Those
+    # are different requests and the chart renders them differently.
     storageClass:
     volumeName: 'data'
     existingClaim: ''
@@ -29,22 +119,83 @@ global:
     labels: {}
     selector: {}
     dataSource: {}
-    overrideVolume:
-    overrideVolumeMount:
-
-  ingress:
-    enabled: false
-    className: ''
-    annotations: {}
-    extra_hosts: []
 
   route:
     enabled: false
     vendor: ''
     parentRefs: []
+    # Timeout for regular API paths. Streaming paths (/relay, /ws-proxy) 
+    # always use 0s (unlimited) so they do not get disconnected.
+    apiTimeout: '3600s'
     # STUN likely uses a different port in the gateway, so you can specify a different parent ref here
     stunParentRefs: []
+    # Applied to every route the chart renders.
     annotations: {}
+    # Merged over `annotations` for that route alone, so homepage or
+    # external-dns hints can go on the dashboard route without also landing
+    # on the API and gRPC routes.
+    dashboardAnnotations: {}
+    serverAnnotations: {}
+    stunAnnotations: {}
+
+  # OIDC for the dashboard and the server. Set these to point at an external
+  # provider (Zitadel, Authentik, Auth0, Keycloak).
+  #
+  # Every value in this block defaults to the behaviour the chart had before
+  # the block existed, so an install that sets none of them renders exactly as
+  # it did before: this cannot break a deployment already using the chart.
+  #
+  # These cover both halves: `authority` and the client credentials configure
+  # the dashboard through its environment, while `issuerUrl` is written into
+  # the server's own config file as its `server.auth.issuer` field. Both must
+  # agree for an external IdP to work end to end - a dashboard pointed at a new
+  # provider while the server still expects the old issuer authenticates the
+  # user and then rejects the token.
+  auth:
+    # Issuer the SERVER validates tokens against, written into its config file
+    # as server.auth.issuer. Falls back to `authority` when unset, so pointing
+    # at an external IdP normally means setting `authority` alone and both
+    # halves follow. Set this only when the server must expect a different
+    # issuer from the URL the dashboard talks to.
+    issuerUrl: ''
+    # OIDC provider the DASHBOARD talks to (env AUTH_AUTHORITY).
+    authority: ''         # default: https://<domain.global>/oauth2
+    clientId: ''          # default: netbird-dashboard
+    audience: ''          # default: netbird-dashboard
+    # Prefer existingSecret over this; anything here is committed in plaintext.
+    clientSecret: ''
+    # Name of an existing Secret holding the OIDC client credentials. Overrides
+    # both values above, so neither has to be committed. A missing Secret or
+    # key fails at pod start with `couldn't find key ... in Secret ...` rather
+    # than silently - note that this is kubelet, not Helm, so the sync looks
+    # clean and the pod does not start.
+    #
+    # NOTE: the NetBird dashboard bakes AUTH_CLIENT_SECRET into its frontend JS
+    # and performs the token exchange from the browser, so this value reaches
+    # every visitor regardless (netbirdio/netbird#4188). Sourcing it from a
+    # Secret keeps it out of git; it does not make it confidential. Use a public
+    # client with PKCE where your IdP supports one.
+    existingSecret: ''
+    # Which keys to read inside existingSecret. The defaults are this chart's
+    # own names; override them when the Secret comes from something that names
+    # its keys differently - External Secrets templates and most IdP operators
+    # emit `client-id`/`client-secret`. Without these you need a second Secret
+    # that exists only to rename two keys.
+    existingSecretClientIdKey: 'clientId'
+    existingSecretClientSecretKey: 'clientSecret'
+    # A public client authenticates with PKCE and has no client secret, which
+    # is what the NOTE above recommends. Set this and the chart stops reading a
+    # client-secret key at all, so existingSecret does not have to carry an
+    # empty one purely to get the pod past CreateContainerConfigError.
+    publicClient: false
+    supportedScopes: ''   # default: openid profile email groups
+    # Paths the dashboard returns to after login. Both halves follow: the
+    # dashboard gets them as AUTH_REDIRECT_URI/AUTH_SILENT_REDIRECT_URI and the
+    # server advertises them under server.auth.dashboardRedirectURIs. They must
+    # be paths, not absolute URLs - the server prefixes the domain.
+    redirectURI: ''       # default: /nb-auth
+    silentRedirectURI: '' # default: /nb-silent-auth
+    useAuth0:             # default: false
 
   serviceAccount:
     create: true
@@ -54,16 +205,26 @@ global:
 
 
 dashboard:
+  # Additional env vars appended to the dashboard container.
+  extra_env: []
   image:
     repository: netbirdio/dashboard
-    tag: v2.33.0
+    tag: v2.39.0
     pullPolicy: IfNotPresent
   annotations: {}
+  # Annotations on the Deployment object itself, as opposed to `annotations`
+  # above, which land on the pod template. Operators that watch workloads read
+  # these - Reloader's `reloader.stakater.com/auto: "true"` belongs here, not
+  # on the pod.
+  deploymentAnnotations: {}
   labels: {}
   nodeSelector: {}
   tolerations: []
   affinity: {}
   replicaCount: 1
+  # Pod-level and container-level securityContext, empty by default.
+  podSecurityContext: {}
+  securityContext: {}
   resources: {}
   livenessProbe:
   readinessProbe:
@@ -77,14 +238,22 @@ dashboard:
 server:
   image:
     repository: netbirdio/netbird-server
-    tag: 0.66.0
+    tag: 0.77.1
     pullPolicy: IfNotPresent
   annotations: {}
+  # Annotations on the Deployment object itself, as opposed to `annotations`
+  # above, which land on the pod template. Operators that watch workloads read
+  # these - Reloader's `reloader.stakater.com/auto: "true"` belongs here, not
+  # on the pod.
+  deploymentAnnotations: {}
   labels: {}
   nodeSelector: {}
   tolerations: []
   affinity: {}
   replicaCount: 1
+  # Pod-level and container-level securityContext, empty by default.
+  podSecurityContext: {}
+  securityContext: {}
   resources: {}
   livenessProbe:
   readinessProbe:
@@ -94,6 +263,15 @@ server:
   extra_volumes: []
   extra_volumeMounts: []
   extra_args: []
+  # Hash the rendered config into the pod template, so that changing any value
+  # that ends up in config.yaml rolls the pod. Without it nothing does: the file
+  # is mounted with subPath, which never receives Secret updates, so the running
+  # server keeps the config it started with and the upgrade looks successful.
+  #
+  # Turn it off if an operator such as Reloader watches the Secret instead, and
+  # point that operator at the Deployment with `server.deploymentAnnotations`.
+  # Leaving both on restarts the pod twice for one change.
+  reloadOnConfigChange: true
   persistence:
     dataDir: /var/lib/netbird
     mountPath: /var/lib/netbird

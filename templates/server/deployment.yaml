@@ -2,19 +2,62 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: "{{ include "netbird.fullname" . }}-server"
-  namespace: {{ .Values.global.namespace }}
+  namespace: {{ .Release.Namespace }}
   labels:
     {{- include "netbird.labels" . | nindent 4 }}
     netbird-app: {{ include "netbird.fullname" . }}-server
+  {{- with .Values.server.deploymentAnnotations }}
+  annotations:
+    {{- /*
+    Quoted rather than toYaml'd: annotation values must be strings, and the
+    canonical value here is `reloader.stakater.com/auto: "true"`, which YAML
+    reads as a boolean unless the author remembers the quotes. Unquoted it is
+    rejected at apply time with "cannot unmarshal bool into ... annotations of
+    type string", which does not name the annotation that caused it.
+    */}}
+    {{- range $k, $v := . }}
+    {{ $k | quote }}: {{ $v | quote }}
+    {{- end }}
+  {{- end }}
 spec:
   replicas: {{ .Values.server.replicaCount }}
+  {{- /*
+  Not RollingUpdate. The server keeps its state in a sqlite file on a single RWO
+  PVC, and every replica of this Deployment mounts the same claim - so a rolling
+  update either stalls (new pod scheduled to another node, the volume cannot
+  detach while the old pod holds it, and the old pod will not be evicted until
+  the new one is Ready) or, if both land on the same node, briefly runs two
+  servers writing one database. Recreate enforces what actually has to hold:
+  one writer at a time. It costs an outage the length of a pod restart on every
+  upgrade.
+  */}}
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       {{- include "netbird.selectorLabels" . | nindent 6 }}
       netbird-app: {{ include "netbird.fullname" . }}-server
   template:
     metadata:
-      {{- with .Values.server.annotations }}
+      {{- /*
+      config.yaml is mounted with subPath, and a subPath mount never receives
+      updates from its Secret - so without something changing the pod template,
+      a config change leaves the running container reading whatever it started
+      with and `helm upgrade` reports success having altered nothing. Hashing
+      the rendered Secret rolls the Deployment exactly when the config differs.
+
+      Skipped when the config comes from existingConfigSecret: the chart cannot
+      read that Secret at render time, so there is nothing to hash.
+
+      Also skippable with server.reloadOnConfigChange, for clusters where an
+      operator such as Reloader watches the Secret instead: it wants a stable
+      pod template, and with both active the pod restarts twice per change.
+      */ -}}
+      {{- $ann := .Values.server.annotations | default dict }}
+      {{- if and .Values.server.reloadOnConfigChange (not .Values.global.server.existingConfigSecret) }}
+      {{- $ann = merge (dict "checksum/config" (include (print $.Template.BasePath "/secret.yaml") . | sha256sum)) $ann }}
+      {{- end }}
+      {{- with $ann }}
       annotations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
@@ -25,17 +68,38 @@ spec:
         {{- toYaml . | nindent 8 }}
         {{- end }}
     spec:
+      serviceAccountName: {{ include "netbird.serviceAccountName" . }}
+      {{- with .Values.server.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: server
           image: "{{ .Values.server.image.repository }}:{{ .Values.server.image.tag }}"
           imagePullPolicy: {{ .Values.server.image.pullPolicy }}
+          {{- with .Values.server.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           ports:
             - name: http
-              containerPort: 80
+              containerPort: {{ .Values.global.server.port }}
               protocol: TCP
+            {{- if .Values.global.server.stun.enabled }}
             - name: stun
-              containerPort: 3478
+              containerPort: {{ include "netbird.stunPort" . }}
               protocol: UDP
+            {{- end }}
+            {{- if .Values.global.server.metrics.exposed }}
+            - name: metrics
+              containerPort: {{ .Values.global.server.metrics.port | default 9090 }}
+              protocol: TCP
+            {{- end }}
+            {{- if .Values.global.server.legacyGrpc.exposed }}
+            - name: legacy-grpc
+              containerPort: {{ .Values.global.server.legacyGrpc.port | default 33073 }}
+              protocol: TCP
+            {{- end }}
           args:
             - '--config'
             - '{{ .Values.server.persistence.configMountPath }}'
@@ -77,7 +141,7 @@ spec:
       volumes:
         - name: config
           secret:
-            secretName: {{ include "netbird.fullname" . }}-config
+            secretName: {{ include "netbird.configSecretName" . }}
         - name: {{ .Values.global.persistence.volumeName }}
           {{- if .Values.global.persistence.enabled }}
           persistentVolumeClaim:

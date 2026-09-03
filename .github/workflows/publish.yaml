@@ -1,180 +1,139 @@
-name: Publish Helm chart to external helm-charts repo
+name: Publish Helm chart to GHCR
 
 env:
   CHART_NAME: netbird
-  HELM_CHARTS_REPO: https://github.com/cclloyd/helm-charts.git
   GHCR_REGISTRY: ghcr.io
-  GHCR_NAMESPACE: cclloyd/helm-netbird
 
 on:
+  pull_request:
   push:
     tags:
       - 'v*'
+    branches:
+      - '**'
+  workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
   packages: write
 
+concurrency:
+  group: publish-chart
+  cancel-in-progress: false
+
 jobs:
-  publish:
+  validate:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout helm-${{ env.CHART_NAME }}
-        uses: actions/checkout@v3
-        with:
-          fetch-depth: 0
+      - uses: actions/checkout@v7
 
-      - name: Setup Helm
-        uses: azure/setup-helm@v3
+      - uses: azure/setup-helm@v5
 
-      - name: Install jq
-        run: sudo apt-get install -y jq
-
-      - name: Prepare main branch and compute chart version
-        id: prepare
+      - name: Lint and render
         run: |
-          set -e
+          set -euo pipefail
+          helm lint . \
+            --set global.domain.global=example.com \
+            --set global.server.encryption_key=dummy \
+            --set global.server.auth_secret=dummy
+          helm template t . \
+            --set global.domain.global=example.com \
+            --set global.server.encryption_key=dummy \
+            --set global.server.auth_secret=dummy > /dev/null
 
-          # Find the latest semver tag: vX.X.X
-          latest_tag=$(git ls-remote --tags origin \
-            | awk '{print $2}' \
-            | sed 's#refs/tags/##' \
-            | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
-            | sort -V | tail -n1)
-          latest_tag=${latest_tag:-v0.1.0}
+  publish:
+    needs: validate
+    # Branches publish snapshots so work in progress can be installed. main
+    # publishes nothing on its own - anything released from it is tagged, which
+    # takes the release path below. Pull requests publish nothing at all.
+    if: github.event_name != 'pull_request' && github.ref != 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
 
-          mkdir -p helm-charts
-          if git ls-remote --exit-code --heads "$HELM_CHARTS_REPO" main >/dev/null; then
-            git clone --single-branch --branch main "$HELM_CHARTS_REPO" helm-charts
-            cd helm-charts
-            if [[ "${GITHUB_REF}" == "refs/heads/dev" ]]; then
-              base_version="${latest_tag#v}"
-              max_n=0
-              for f in ${CHART_NAME}-${base_version}-*.tgz; do
-                [[ $f =~ ${CHART_NAME}-${base_version}-([0-9]+)\.tgz ]] \
-                  && [[ ${BASH_REMATCH[1]} -gt $max_n ]] \
-                  && max_n=${BASH_REMATCH[1]}
-              done
-              version="${base_version}-$((max_n + 1))"
-            elif [[ "${GITHUB_REF}" =~ refs/tags/v([0-9]+\.[0-9]+\.[0-9]+) ]]; then
-              version="${BASH_REMATCH[1]}"
-            else
-              version="${latest_tag#v}"
+      - uses: azure/setup-helm@v5
+
+      - name: Determine version and check it matches Chart.yaml
+        run: |
+          set -euo pipefail
+
+          chart_version="$(helm show chart . | yq -r '.version')"
+
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            version="${GITHUB_REF_NAME#v}"
+
+            if [ "$version" != "$chart_version" ]; then
+              echo "::error::Tag says $version but Chart.yaml says $chart_version."
+              echo "The chart version is what lands in helm.sh/chart on every rendered"
+              echo "object, so the two must agree. Update Chart.yaml and re-tag."
+              exit 1
             fi
-            cd ..
+
+            kind=release
           else
-            git clone --no-checkout "$HELM_CHARTS_REPO" helm-charts
-            cd helm-charts
-            git checkout --orphan main
-            git rm -rf . || true
-            git config user.name 'GitHub Actions'
-            git config user.email 'actions@github.com'
-            version="${latest_tag#v}"
-            touch .nojekyll
-            git add .nojekyll
-            git commit -m "Initialize main with .nojekyll"
-            cd ..
+            # Immutable per-commit version, so a build can be pinned and
+            # rolled back to.
+            #
+            # A hyphen starts a prerelease, a dot extends one:
+            #   1.2.0      -> 1.2.0-snapshot.abc1234
+            #   2.0.0-rc.1 -> 2.0.0-rc.1.snapshot.abc1234
+            # Using a hyphen on the second gives 2.0.0-rc.1-snapshot.abc1234,
+            # which sorts above 2.0.0-rc.2.
+            case "$chart_version" in
+              *-*) version="${chart_version}.snapshot.${GITHUB_SHA:0:7}" ;;
+              *)   version="${chart_version}-snapshot.${GITHUB_SHA:0:7}" ;;
+            esac
+            kind=snapshot
+            echo "Snapshot build: ${version}"
           fi
 
-          if [ -z "$version" ]; then
-            echo "ERROR: Could not determine chart version."
+          if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "::error::'$version' is not a semver version."
             exit 1
           fi
 
-          echo "Using chart version: v$version"
-          echo "VERSION=$version" >> $GITHUB_ENV
-          echo "PKG_VERSION=$version" >> $GITHUB_ENV
+          printf 'VERSION=%s\n' "$version" >> "$GITHUB_ENV"
+          printf 'KIND=%s\n' "$kind" >> "$GITHUB_ENV"
 
-      - name: Update Chart.yaml version
+      - name: Package
         run: |
-          yq -i ".version = \"${VERSION}\"" Chart.yaml
-
-
-
-      - name: Package ${{ env.CHART_NAME }} chart
-        run: |
+          set -euo pipefail
           mkdir -p packages
-          helm package ./ \
-            --version "${VERSION}" \
-            --destination packages
-      - name: Package ${{ env.CHART_NAME }} chart (0.0.0-latest)
-        run: |
-          # Save current Chart.yaml
-          cp Chart.yaml Chart.yaml.bak
+          # --version sets the version inside the package and leaves Chart.yaml
+          # on disk alone, so no edit-and-restore is needed.
+          #
+          # VERSION is immutable either way now - a release tag or a
+          # commit-derived snapshot - so it is always worth publishing.
+          helm package . --version "${VERSION}" --destination packages
 
-          yq -i '.version = "0.0.0-latest"' Chart.yaml
-
-          # Package chart with the "latest" version
-          helm package ./ \
-            --version "0.0.0-latest" \
-            --destination packages
-
-          # Restore original Chart.yaml
-          mv Chart.yaml.bak Chart.yaml
-
-
-
-
-      - name: Login to GHCR
+      - name: Log in to GHCR
         env:
-          GITHUB_TOKEN: ${{ secrets.HELM_CHARTS_PAT }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_USER: ${{ github.actor }}
         run: |
-          echo "${GITHUB_TOKEN}" | \
-            helm registry login "${GHCR_REGISTRY}" \
-              --username "${GITHUB_ACTOR}" \
-              --password-stdin
+          set -euo pipefail
+          printf '%s' "${GHCR_TOKEN}" \
+            | helm registry login "${GHCR_REGISTRY}" \
+                --username "${GHCR_USER}" --password-stdin
 
-      - name: Push Helm chart to GHCR (OCI)
+      - name: Push to GHCR
+        env:
+          REPO_OWNER: ${{ github.repository_owner }}
+          REPO_FULL: ${{ github.repository }}
         run: |
-          CHART_TGZ="packages/${CHART_NAME}-${PKG_VERSION}.tgz"
-          if [ ! -f "${CHART_TGZ}" ]; then
-            echo "Chart package ${CHART_TGZ} not found"
-            exit 1
-          fi
-          helm push "${CHART_TGZ}" \
-            "oci://${GHCR_REGISTRY}/${GHCR_NAMESPACE}"
+          set -euo pipefail
+          # GHCR namespaces must be lowercase.
+          owner="$(printf '%s' "${REPO_OWNER}" | tr '[:upper:]' '[:lower:]')"
+          repo="$(basename "${REPO_FULL}")"
+          dest="oci://${GHCR_REGISTRY}/${owner}/${repo}"
 
-      - name: Push Helm chart to GHCR (OCI, 0.0.0-latest)
-        run: |
-          LATEST_TGZ="packages/${CHART_NAME}-0.0.0-latest.tgz"
-          if [ ! -f "${LATEST_TGZ}" ]; then
-            echo "Chart package ${LATEST_TGZ} not found"
-            exit 1
-          fi
-          helm push "${LATEST_TGZ}" \
-            "oci://${GHCR_REGISTRY}/${GHCR_NAMESPACE}"
+          tgz="packages/${CHART_NAME}-${VERSION}.tgz"
+          [ -f "$tgz" ] || { echo "::error::$tgz not found"; exit 1; }
+          helm push "$tgz" "$dest"
 
-
-
-      - name: Copy packaged chart to subfolder (/charts/${{ env.CHART_NAME }})
-        run: |
-          mkdir -p helm-charts/charts/${CHART_NAME}
-          cp packages/${CHART_NAME}-${PKG_VERSION}.tgz helm-charts/charts/${CHART_NAME}/
-
-
-      - name: Regenerate index.yaml at root (recursive)
-        run: |
-          cd helm-charts
-          CHARTS_URL="https://cclloyd.github.io/helm-charts/charts/${CHART_NAME}"
-          INDEX_FILE="index.yaml"
-          if [ -f "${INDEX_FILE}" ]; then
-            helm repo index charts/${CHART_NAME} \
-              --url "${CHARTS_URL}" \
-              --merge "${INDEX_FILE}"
-          else
-            helm repo index charts/${CHART_NAME} \
-              --url "${CHARTS_URL}"
-          fi
-          cp charts/${CHART_NAME}/index.yaml .
-
-
-      - name: Commit & push to main
-        run: |
-          cd helm-charts
-          git config user.name 'GitHub Actions'
-          git config user.email 'actions@github.com'
-          : > .nojekyll
-          git add charts/${CHART_NAME}/${CHART_NAME}-${PKG_VERSION}.tgz index.yaml .nojekyll
-          git commit -m "[ci] Publish ${CHART_NAME} chart ${PKG_VERSION}" || echo "Nothing to commit"
-          git remote set-url origin https://x-access-token:${{ secrets.HELM_CHARTS_PAT }}@github.com/cclloyd/helm-charts.git
-          git push origin main
+          {
+            echo "### Published (${KIND})"
+            echo '```'
+            echo "${dest}/${CHART_NAME}:${VERSION}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
