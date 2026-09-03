@@ -14,7 +14,7 @@ EXTRA ?=
 COMMON = --namespace $(NAMESPACE) $(VALUES_ARG) $(EXTRA)
 
 .DEFAULT_GOAL := help
-.PHONY: help deps template template-debug install diff-upgrade upgrade force-upgrade uninstall wipe status test
+.PHONY: help deps template template-debug install diff-upgrade upgrade force-upgrade uninstall wipe status test test-reload
 
 help:
 	@echo 'Targets:'
@@ -29,6 +29,7 @@ help:
 	@echo '  wipe            delete the whole namespace, PVC and data included'
 	@echo '  status          pods, services and routes for the release'
 	@echo '  test            smoke-test a deployed release from inside the cluster'
+	@echo '  test-reload     prove a config change reaches the container (restarts the pod twice)'
 	@echo ''
 	@echo 'Current values:'
 	@echo '  NAMESPACE=$(NAMESPACE)  RELEASE=$(RELEASE)  CHART=$(CHART)  TIMEOUT=$(TIMEOUT)'
@@ -100,6 +101,34 @@ test:
 		wget -qO- -T5 http://$(RELEASE)-server-http:9090/metrics | grep -q . \
 		  || { echo "  server     /metrics     FAILED"; exit 1; }; \
 		echo "  server     /metrics     serving"'
+
+test-reload:
+	@echo 'Restarts the server pod twice: once for the probe change, once reverting it.'
+	@set -e; \
+	probe=$$(( ($$(date +%s) % 1000) + 1000 )); \
+	sum() { kubectl --namespace $(NAMESPACE) get deploy $(RELEASE)-server \
+		-o jsonpath='{.spec.template.metadata.annotations.checksum/config}'; }; \
+	pod() { kubectl --namespace $(NAMESPACE) get pod -l netbird-app=$(RELEASE)-server \
+		-o jsonpath='{.items[0].metadata.name}'; }; \
+	revert() { $(HELM) upgrade --install $(RELEASE) $(CHART) $(COMMON) --create-namespace \
+		--wait --timeout $(TIMEOUT) >/dev/null 2>&1 || true; }; \
+	b_pod=$$(pod); b_sum=$$(sum); \
+	echo "  before   pod=$$b_pod  checksum=$$(echo $$b_sum | cut -c1-12)"; \
+	trap 'revert' EXIT; \
+	$(HELM) upgrade --install $(RELEASE) $(CHART) $(COMMON) --create-namespace \
+		--wait --timeout $(TIMEOUT) \
+		--set global.server.reverseProxy.accessLogRetentionDays=$$probe >/dev/null; \
+	a_pod=$$(pod); a_sum=$$(sum); \
+	echo "  after    pod=$$a_pod  checksum=$$(echo $$a_sum | cut -c1-12)"; \
+	[ "$$b_sum" != "$$a_sum" ] || { echo '  FAILED: checksum did not change'; exit 1; }; \
+	[ "$$b_pod" != "$$a_pod" ] || { echo '  FAILED: pod did not roll'; exit 1; }; \
+	kubectl --namespace $(NAMESPACE) exec deployment/$(RELEASE)-server -- \
+		grep -q "accessLogRetentionDays: $$probe" $(CONFIG_PATH) \
+		|| { echo '  FAILED: container is still reading the old config'; exit 1; }; \
+	echo "  container reads accessLogRetentionDays: $$probe"; \
+	revert; trap - EXIT; \
+	[ "$$(sum)" = "$$b_sum" ] || { echo '  FAILED: revert did not restore the original config'; exit 1; }; \
+	echo '  reverted; checksum back to its original value'
 
 status:
 	kubectl --namespace $(NAMESPACE) get pods,svc,pvc
