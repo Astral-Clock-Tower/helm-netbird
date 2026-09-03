@@ -68,6 +68,7 @@ To use the minimal setup, you will require
 | global.server.stun.enabled        | Serve STUN from the server pod: config `stunPorts`, container port, Service port and UDPRoute        | `true`                   |
 | global.server.stun.port           | Server STUN port.  Overrides `stun_port` when set.                                                   | `<global.server.stun_port>` |
 | global.server.stun.external       | External STUN servers to advertise to peers, eg `['stun:stun.l.google.com:19302']`                   | `[]`                     |
+| global.server.reverseProxy        | Passed through to NetBird's `reverseProxy` config block; empty fields are omitted                    | see `values.yaml`        |
 | global.server.encryption_key      | Data store encryption key.  Required.                                                                | `''`                     |
 | global.server.auth_secret         | Shared HMAC secret the relay uses to validate peer tokens.  Required.                                | `''`                     |
 | global.server.existingConfigSecret | Name of a Secret holding the whole `config.yaml`.  Suppresses the chart's own config Secret; the render fails if a config-only value is also set. | `''`                     |

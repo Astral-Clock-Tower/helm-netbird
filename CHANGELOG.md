@@ -65,6 +65,15 @@ Diverges from cclloyd/helm-netbird 1.2.0.
 - `global.server.stun.enabled`, `.port` and `.external` - serve STUN on a
   chosen port, advertise external STUN servers, or turn local STUN off
   entirely.
+- `global.server.reverseProxy.*` - passed through to NetBird's `reverseProxy`
+  config block key for key, so `trustedHTTPProxies`, `trustedHTTPProxiesCount`,
+  `trustedPeers`, `accessLogRetentionDays` and `accessLogCleanupIntervalHours`
+  are all reachable, and a field left empty is omitted so NetBird's own default
+  applies. `trustedHTTPProxies` keeps its previous hardcoded `0.0.0.0/0`, which
+  trusts `X-Forwarded-For` from anywhere - narrow it to your gateway's pod
+  CIDR. Setting `trustedPeers` also clears NetBird's boot warning that the
+  default allows connection IP spoofing.
+
 - `global.route.apiTimeout`, pod and container `securityContext` on both
   components, `dashboard.extra_env`.
 

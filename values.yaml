@@ -35,6 +35,28 @@ global:
     encryption_key: '' # openssl rand -base64 32
     # Shared HMAC secret the relay uses to validate peer tokens.
     auth_secret: '' # openssl rand -base64 32
+    # Passed through to the server's `reverseProxy` config block, key for key.
+    # Anything left empty is omitted from the file entirely, so NetBird's own
+    # default applies rather than a zero value overwriting it.
+    reverseProxy:
+      # CIDRs whose X-Forwarded-For the server will believe when working out a
+      # client's real IP. 0.0.0.0/0 is what this chart has always sent, and it
+      # means "trust that header from anywhere" - anyone able to reach the
+      # server directly can claim any source IP. Narrow it to the pod CIDR your
+      # gateway runs in once you know it.
+      trustedHTTPProxies:
+        - '0.0.0.0/0'
+      # Alternative to the list above: how many proxies sit in front of the
+      # server, counted from the right of X-Forwarded-For. Set one or the other.
+      trustedHTTPProxiesCount:
+      # CIDRs of peer networks whose forwarded headers are trusted, eg
+      # ['100.64.0.0/10']. Left empty NetBird defaults it to 0.0.0.0/0 and
+      # ::/0 and warns at boot that this allows connection IP spoofing.
+      trustedPeers: []
+      # Days to keep HTTP access logs, and how often the cleanup runs.
+      accessLogRetentionDays:
+      accessLogCleanupIntervalHours:
+
     # Name of an existing Secret holding the whole config.yaml under a
     # `config.yaml` key, so the file can be managed by SOPS, External Secrets,
     # Vault or sealed-secrets instead of by the values above.
