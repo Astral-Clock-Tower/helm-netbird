@@ -10,7 +10,6 @@ nameOverride: ''
 fullnameOverride: ''
 
 global:
-  namespace: 'netbird'
   # Domain name used for access, ex netbird.example.com
   domain:
     global: '' # This is the only required domain.  The below ones are optional for if your network topology requires them.

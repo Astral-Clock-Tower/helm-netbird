@@ -61,7 +61,6 @@ To use the minimal setup, you will require
 
 | config                            | description                                                                                          | default                  |
 |-----------------------------------|------------------------------------------------------------------------------------------------------|--------------------------|
-| global.namespace                  | Namespace for Netbird                                                                                | `'netbird'`              |
 | global.domain.global              | Domain name used for access (e.g. netbird.example.com)                                               | `''`                     |
 | global.dashboard.port             | Dashboard HTTP port                                                                                  | `80`                     |
 | global.server.port                | Server HTTP port                                                                                     | `80`                     |

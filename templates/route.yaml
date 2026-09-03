@@ -6,7 +6,7 @@ apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
   name: {{ $fullName }}-server
-  namespace: {{ .Values.global.namespace }}
+  namespace: {{ .Release.Namespace }}
   labels:
     {{- include "netbird.labels" . | nindent 4 }}
   {{- $ann := merge (dict) (.Values.global.route.serverAnnotations | default dict) (.Values.global.route.annotations | default dict) }}
@@ -61,7 +61,7 @@ apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
   name: {{ $fullName }}-dashboard
-  namespace: {{ .Values.global.namespace }}
+  namespace: {{ .Release.Namespace }}
   labels:
     {{- include "netbird.labels" . | nindent 4 }}
   {{- $ann := merge (dict) (.Values.global.route.dashboardAnnotations | default dict) (.Values.global.route.annotations | default dict) }}
@@ -98,7 +98,7 @@ apiVersion: gateway.networking.k8s.io/v1alpha2
 kind: UDPRoute
 metadata:
   name: {{ $fullName }}-stun
-  namespace: {{ $.Values.global.namespace }}
+  namespace: {{ $.Release.Namespace }}
   labels:
     {{- include "netbird.labels" $ | nindent 4 }}
   {{- $ann := merge (dict) ($.Values.global.route.stunAnnotations | default dict) ($.Values.global.route.annotations | default dict) }}
@@ -124,7 +124,7 @@ apiVersion: gateway.networking.k8s.io/v1
 kind: GRPCRoute
 metadata:
   name: {{ $fullName }}-server-management
-  namespace: {{ .Values.global.namespace }}
+  namespace: {{ .Release.Namespace }}
   labels:
     {{- include "netbird.labels" . | nindent 4 }}
   {{- $ann := merge (dict) (.Values.global.route.serverAnnotations | default dict) (.Values.global.route.annotations | default dict) }}
@@ -157,7 +157,7 @@ apiVersion: gateway.networking.k8s.io/v1
 kind: GRPCRoute
 metadata:
   name: {{ $fullName }}-server-signal
-  namespace: {{ .Values.global.namespace }}
+  namespace: {{ .Release.Namespace }}
   labels:
     {{- include "netbird.labels" . | nindent 4 }}
   {{- $ann := merge (dict) (.Values.global.route.serverAnnotations | default dict) (.Values.global.route.annotations | default dict) }}
@@ -191,7 +191,7 @@ apiVersion: gateway.envoyproxy.io/v1alpha1
 kind: BackendTrafficPolicy
 metadata:
   name: {{ $fullName }}-server-timeouts
-  namespace: {{ .Values.global.namespace | default .Release.Namespace }}
+  namespace: {{ .Release.Namespace }}
 spec:
   targetRefs:
     - group: 'gateway.networking.k8s.io'
@@ -217,7 +217,7 @@ apiVersion: gateway.envoyproxy.io/v1alpha1
 kind: BackendTrafficPolicy
 metadata:
   name: {{ $fullName }}-server-management-timeouts
-  namespace: {{ .Values.global.namespace | default .Release.Namespace }}
+  namespace: {{ .Release.Namespace }}
 spec:
   targetRefs:
     - group: 'gateway.networking.k8s.io'
@@ -237,7 +237,7 @@ apiVersion: gateway.envoyproxy.io/v1alpha1
 kind: BackendTrafficPolicy
 metadata:
   name: {{ $fullName }}-server-signal-timeouts
-  namespace: {{ .Values.global.namespace | default .Release.Namespace }}
+  namespace: {{ .Release.Namespace }}
 spec:
   targetRefs:
     - group: 'gateway.networking.k8s.io'

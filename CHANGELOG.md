@@ -27,6 +27,21 @@ Diverges from cclloyd/helm-netbird 1.2.0.
   a new `-server-http` Service. The chart's own routes were repointed; anything
   of yours aimed at `-server` for HTTP - your own HTTPRoute, an Ingress, an
   external probe - has to move to `-server-http`.
+- **`global.namespace` is gone; resources follow `--namespace` and Argo's
+  destination.** Every object took `metadata.namespace` from that value, which
+  defaulted to `netbird`, so `helm -n prod install` recorded the release in
+  `prod` and created the resources in `netbird`. An Argo Application with a
+  `prod` destination did the same, or failed the sync if the AppProject did not
+  permit `netbird`. Templates now use `.Release.Namespace`.
+
+  If your `-n` already matched `global.namespace`, nothing moves. If it did not,
+  your resources have been in the namespace named by `global.namespace` all
+  along, and this release will try to recreate them under `-n` - including a
+  new, **empty** PVC, because PVCs are namespaced and the old one stays where it
+  is. The safe move is to keep installing with `-n <the old global.namespace>`
+  so nothing relocates; migrate deliberately, with a volume snapshot, if you
+  want them somewhere else.
+
 - **The server Deployment uses `strategy: Recreate`.** Upgrades now stop the
   old pod before starting the new one, so they take a short outage instead of
   risking two servers on one sqlite file.
