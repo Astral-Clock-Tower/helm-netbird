@@ -1,0 +1,56 @@
+# Template for values_local.yml, which is gitignored:
+#
+#   cp values_example.yml values_local.yml
+#   $EDITOR values_local.yml
+#   make upgrade
+#
+# The Makefile passes values_dev.yml first and values_local.yml second, so
+# anything set here overrides the committed dev defaults and no --set flags are
+# needed. Everything below names something specific to one cluster - a gateway,
+# a hostname, a storage class - which is why the real file stays out of git.
+
+global:
+  domain:
+    # The hostname browsers and peers use. It has to resolve to your gateway's
+    # address AND be covered by the certificate on its TLS listener. The
+    # dashboard bakes https://<this>:443 into its frontend and the browser
+    # resolves it, so if this is wrong the page loads and every request fails.
+    global: netbird.example.com
+
+  server:
+    # Both are required - the render fails without them, and '' counts as
+    # missing. Generate each separately:
+    #
+    #   openssl rand -base64 32
+    #
+    # encryption_key protects the store; changing it later orphans the existing
+    # database. auth_secret is the HMAC the relay validates peer tokens with.
+    encryption_key: 'REPLACE-ME-openssl-rand-base64-32'
+    auth_secret: 'REPLACE-ME-openssl-rand-base64-32'
+
+  route:
+    enabled: true
+    # 'envoy' additionally installs the BackendTrafficPolicy objects that stop
+    # /relay and the gRPC streams from being timed out. Leave it empty for
+    # other implementations and set the equivalent timeouts yourself.
+    vendor: 'envoy'
+    # Where the routes attach. sectionName picks the listener, and it has to be
+    # the TLS one - the endpoints above are https.
+    parentRefs:
+      - name: my-gateway
+        namespace: gateway-system
+        sectionName: https
+    # STUN is UDP and needs a UDP listener on the gateway. Leave this empty if
+    # you have none: the chart then renders no UDPRoute at all, rather than one
+    # that can never attach, and peers fall back to the relay.
+    stunParentRefs: []
+
+  persistence:
+    # Worth setting explicitly under GitOps, and on any cluster with more than
+    # one class annotated as default - storageClassName is immutable once the
+    # PVC binds, so guessing wrong is expensive to undo.
+    #
+    # Careful: '' does not mean "unset" here. It means "no dynamic
+    # provisioning, bind a PV I made myself". To let the cluster default
+    # decide, delete this key.
+    storageClass: my-storage-class
