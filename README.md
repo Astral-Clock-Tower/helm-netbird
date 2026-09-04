@@ -108,6 +108,56 @@ value creates an account nobody can log into. The chart rejects one.
 
 ---
 
+# Databases
+
+NetBird keeps three databases and the chart configures each separately. All
+three default to sqlite on the PVC, which is the whole configuration for a
+small install.
+
+| config key                    | holds                         | postgres | dsn from env |
+|-------------------------------|-------------------------------|----------|--------------|
+| `global.server.store`         | NetBird's own data            | yes      | yes          |
+| `global.server.activityStore` | activity events               | yes      | yes          |
+| `global.server.authStore`     | the embedded IdP's identities | yes      | no           |
+
+A connection string carries a password, and anything set in values lands in the
+config Secret the chart renders. Two of the three can read theirs from the
+server container's environment instead, so it can come from a Secret you already
+have — a CloudNativePG cluster's generated `-app` Secret, whose `uri` key is a
+DSN NetBird accepts as-is:
+
+```yaml
+global:
+  server:
+    store:
+      engine: postgres    # dsn deliberately unset
+server:
+  extra_env:
+    - name: NB_STORE_ENGINE_POSTGRES_DSN
+      valueFrom:
+        secretKeyRef: {name: netbird-pg-app, key: uri}
+```
+
+That works because NetBird only copies a non-empty `store.dsn` over the
+variable. The activity store needs both halves in the environment, since naming
+its engine in `config.yaml` without a `dsn` is rejected at startup:
+
+```yaml
+server:
+  extra_env:                   # and global.server.activityStore left unset
+    - name: NB_ACTIVITY_EVENT_STORE_ENGINE
+      value: postgres
+    - name: NB_ACTIVITY_EVENT_POSTGRES_DSN
+      valueFrom:
+        secretKeyRef: {name: netbird-events-pg, key: uri}
+```
+
+The embedded IdP has no such route, so that one password has to be in the file —
+a reason to manage the file yourself with `global.server.existingConfigSecret`
+and SOPS, sealed-secrets or External Secrets.
+
+---
+
 # Full Configuration
 
 ## Global Settings
@@ -149,6 +199,11 @@ value creates an account nobody can log into. The chart rejects one.
 | global.route.dashboardAnnotations | Merged over `annotations` for the dashboard route alone                                              | `{}`                     |
 | global.route.serverAnnotations    | Merged over `annotations` for the server routes alone                                                | `{}`                     |
 | global.route.stunAnnotations      | Merged over `annotations` for the STUN route alone                                                   | `{}`                     |
+| global.server.store.engine        | Main store engine: `sqlite`, `postgres` or `mysql`                                                   | `'sqlite'`               |
+| global.server.store.dsn           | Connection string.  May be left empty on postgres/mysql and supplied as `NB_STORE_ENGINE_POSTGRES_DSN` (or `..._MYSQL_DSN`) through `server.extra_env`. | `''` |
+| global.server.activityStore.engine | Activity event store engine, `sqlite` or `postgres`.  Unset keeps it at `<dataDir>/events.db`.      | `''`                     |
+| global.server.activityStore.dsn   | Connection string, **required** when `activityStore.engine` is `postgres`.  To source it from a Secret, leave the whole block unset and set `NB_ACTIVITY_EVENT_STORE_ENGINE` and `NB_ACTIVITY_EVENT_POSTGRES_DSN` in `server.extra_env`. | `''` |
+| global.server.activityStore.file  | Custom sqlite path; relative paths resolve against `dataDir`                                         | `''`                     |
 | global.server.authStore.engine    | Embedded IdP store engine, `sqlite3` or `postgres`.  Unset keeps it at `<dataDir>/idp.db`.           | `''`                     |
 | global.server.authStore.dsn       | Connection string, required when `authStore.engine` is `postgres`                                    | `''`                     |
 | global.server.authStore.file      | Custom sqlite path; relative paths resolve against `dataDir`                                         | `''`                     |
@@ -232,6 +287,7 @@ value creates an account nobody can log into. The chart rejects one.
 | server.extra_volumes               | Additional volumes         | `[]`                         |
 | server.extra_volumeMounts          | Additional volume mounts   | `[]`                         |
 | server.extra_args                  | Additional CLI arguments   | `[]`                         |
+| server.extra_env                   | Additional env vars.  See [Databases](#databases). | `[]`         |
 | server.persistence.dataDir         | Server `dataDir` in config | `'/var/lib/netbird'`         |
 | server.persistence.mountPath       | Where to mount storage     | `'/var/lib/netbird'`         |
 | server.persistence.configMountPath | Where to mount config      | `'/etc/netbird/config.yaml'` |

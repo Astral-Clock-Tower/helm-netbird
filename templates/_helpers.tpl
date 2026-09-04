@@ -111,3 +111,32 @@ foreign host renders fine and then fails at login. Caught here instead.
 {{- end -}}
 {{- end -}}
 {{- end -}}
+
+{{/*
+Fail on an extra_env name the chart already sets, or one set twice.
+
+Not defensive duplication of what Kubernetes checks: a duplicate is silent under
+client-side apply - last one wins, only the API server warns - and the dashboard
+exits when an AUTH_* it needs is empty, so overriding one there costs a startup
+with nothing pointing at the cause. Server-side apply does reject duplicates,
+loudly, but only installs that use it.
+
+Call with (dict "path" "server.extra_env" "env" <list> "reserved" <dict of name -> the value that sets it>).
+*/}}
+{{- define "netbird.validateExtraEnv" -}}
+{{- $path := .path -}}
+{{- $reserved := default dict .reserved -}}
+{{- $seen := dict -}}
+{{- range (default (list) .env) -}}
+{{- $name := .name | default "" -}}
+{{- if $name -}}
+{{- if hasKey $reserved $name -}}
+{{- fail (printf "%s sets %s, which this chart already sets from %s. Change it there instead." $path $name (index $reserved $name)) -}}
+{{- end -}}
+{{- if hasKey $seen $name -}}
+{{- fail (printf "%s sets %s twice. A container's env is keyed by name, so the second entry silently wins - keep one." $path $name) -}}
+{{- end -}}
+{{- $_ := set $seen $name true -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}

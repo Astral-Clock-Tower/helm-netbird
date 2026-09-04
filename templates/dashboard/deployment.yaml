@@ -57,6 +57,25 @@ spec:
             - name: http
               containerPort: 80
               protocol: TCP
+          {{- /*
+          Every name below is owned by a value, so this goes stale only when
+          someone edits this block - not when NetBird ships new variables.
+          */}}
+          {{- include "netbird.validateExtraEnv" (dict "path" "dashboard.extra_env" "env" .Values.dashboard.extra_env "reserved" (dict
+            "NETBIRD_MGMT_API_ENDPOINT" "global.domain.global"
+            "NETBIRD_MGMT_GRPC_API_ENDPOINT" "global.domain.global"
+            "AUTH_AUDIENCE" "global.auth.audience"
+            "AUTH_CLIENT_ID" "global.auth.clientId or global.auth.existingSecret"
+            "AUTH_CLIENT_SECRET" "global.auth.clientSecret, global.auth.existingSecret or global.auth.publicClient"
+            "AUTH_AUTHORITY" "global.auth.authority"
+            "USE_AUTH0" "global.auth.useAuth0"
+            "AUTH_SUPPORTED_SCOPES" "global.auth.supportedScopes"
+            "AUTH_REDIRECT_URI" "global.auth.redirectURI"
+            "AUTH_SILENT_REDIRECT_URI" "global.auth.silentRedirectURI"
+            "NGINX_SSL_PORT" "the chart, which fixes it at 443"
+            "LETSENCRYPT_DOMAIN" "dashboard.letsencrypt.domain"
+            "LETSENCRYPT_EMAIL" "dashboard.letsencrypt.email"
+          )) }}
           env:
             - name: NETBIRD_MGMT_API_ENDPOINT
               value: "https://{{ .Values.global.domain.global }}:443"

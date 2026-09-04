@@ -86,6 +86,22 @@ Diverges from cclloyd/helm-netbird 1.2.0.
 
 ### Added
 
+- `global.server.store.{engine,dsn}` and
+  `global.server.activityStore.{engine,dsn,file}` - Postgres for NetBird's own
+  data and its activity events, from values. Only the embedded IdP's `authStore`
+  was configurable before; the rest was hardcoded to sqlite, so Postgres meant
+  hand-writing `config.yaml` behind `existingConfigSecret`. Both still default
+  to sqlite, and an install that does not set them renders byte for byte as
+  before. An unsupported engine, or a `postgres` activity or auth store with no
+  `dsn`, now fails the render instead of the pod.
+- `server.extra_env` - the container had no `env` block at all before, which
+  left `extra_volumes`, `extra_volumeMounts` and `extra_args` without their
+  sibling. It keeps a database password out of the rendered config Secret
+  (leave `store.dsn` empty, supply `NB_STORE_ENGINE_POSTGRES_DSN` from a
+  `secretKeyRef`), and carries the other variables NetBird reads from the
+  environment - `NB_IDP_SESSION_COOKIE_ENCRYPTION_KEY`,
+  `NB_CACHE_REDIS_ADDRESS` - plus ordinary operational env. Not
+  `authStore.dsn`, which has no environment variable.
 - `global.server.existingConfigSecret` - point at a Secret holding the whole
   `config.yaml` and the chart renders none of its own. Fails the render if a
   value that only reaches NetBird through that file is also set.
@@ -170,6 +186,11 @@ Diverges from cclloyd/helm-netbird 1.2.0.
 
 ### Changed
 
+- `dashboard.extra_env` now fails the render when an entry repeats a name the
+  chart sets, or repeats itself. It used to append it anyway and let the
+  duplicate win silently - which, for the `AUTH_*` variables the dashboard's
+  entrypoint exits without, meant a crash loop with nothing pointing at the
+  cause. Each of those names has a value of its own to set instead.
 - NetBird 0.66.0 -> 0.78.1, dashboard v2.33.0 -> v2.92.0. The sqlite store is
   migrated in place, so snapshot the PVC before upgrading.
 
