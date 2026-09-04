@@ -1,3 +1,5 @@
+{{- /* Also checked here: this always renders, secret.yaml does not. */ -}}
+{{- include "netbird.validateAuthHost" . -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -95,7 +97,11 @@ spec:
             - name: NGINX_SSL_PORT
               value: "443"
             - name: LETSENCRYPT_DOMAIN
-              value: "none"
+              value: {{ .Values.dashboard.letsencrypt.domain | quote }}
+            {{- with .Values.dashboard.letsencrypt.email }}
+            - name: LETSENCRYPT_EMAIL
+              value: {{ . | quote }}
+            {{- end }}
             {{- with .Values.dashboard.extra_env }}
             {{- toYaml . | nindent 12 }}
             {{- end }}

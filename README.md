@@ -55,6 +55,59 @@ To use the minimal setup, you will require
 
 ---
 
+# Authentication
+
+NetBird's combined image (`netbirdio/netbird-server`, which is what this chart
+runs) ships an **embedded Dex identity provider, and that provider is always the
+issuer**. `combined/cmd/config.go` builds it with `Enabled: true`
+unconditionally, then overwrites the management server's issuer, audience, JWKS
+location and discovery endpoint with Dex's own values. There is no `config.yaml`
+field that disables it and none that points the server at an external IdP.
+Verified against netbird v0.78.1.
+
+So `global.auth.*` does **not** point NetBird at an external provider — it
+configures NetBird's own Dex and the dashboard's view of it. The defaults are
+already correct, and most installs should set none of it. Pointing
+`global.auth.authority` or `issuerUrl` at an external provider only splits the
+dashboard off from the server, which authenticates the user and then rejects the
+token; the chart fails the render rather than let that happen.
+
+## Using an external provider (Zitadel, Authentik, Auth0, Keycloak)
+
+Attach it to Dex as an upstream **connector**. Dex stays the issuer and
+federates the login onwards. Leave `global.auth.authority`, `clientId` and
+`audience` unset.
+
+1. Create a **confidential** app in the provider. For Zitadel that is
+   application type **Web** with auth method **Code** — *not* PKCE, since a
+   connector requires a client secret.
+2. Add it in the NetBird dashboard under **Identity Providers**, and paste the
+   callback URL it shows you into the provider's redirect URIs. Equivalently,
+   `POST /api/identity-providers` with `{type, name, issuer, client_id,
+   client_secret}`; `type` accepts `oidc`, `zitadel`, `entra`, `google`, `okta`,
+   `pocketid`, `microsoft` and `adfs`. Authenticate that call with a PAT, which
+   can be minted offline against the store:
+   ```shell
+   kubectl exec deploy/<release>-server -n netbird -- \
+     netbird-server token create --name bootstrap --expires-in 365d
+   ```
+3. **Only once a connector exists**, set `global.auth.localAuthDisabled: true`
+   to turn off email/password login. Setting it earlier fails server startup
+   with `cannot disable local authentication: no other identity providers
+   configured`.
+
+Step 2 is a one-time runtime action and cannot currently be expressed in values.
+NetBird's embedded IdP does have a `StaticConnectors` field, but the combined
+image never populates it and `config.yaml` exposes no key for it.
+
+To avoid the first-run "create the first admin account" screen, seed
+`global.auth.owner` — Dex re-applies static passwords on every boot, so it is
+idempotent. Note that `owner.passwordHash` must be a **bcrypt hash**: NetBird
+calls the field `password` but stores it verbatim as the hash, so a plaintext
+value creates an account nobody can log into. The chart rejects one.
+
+---
+
 # Full Configuration
 
 ## Global Settings
@@ -96,8 +149,11 @@ To use the minimal setup, you will require
 | global.route.dashboardAnnotations | Merged over `annotations` for the dashboard route alone                                              | `{}`                     |
 | global.route.serverAnnotations    | Merged over `annotations` for the server routes alone                                                | `{}`                     |
 | global.route.stunAnnotations      | Merged over `annotations` for the STUN route alone                                                   | `{}`                     |
-| global.auth.issuerUrl             | Issuer the server validates tokens against.  Falls back to `authority`.                              | `<global.auth.authority>` |
-| global.auth.authority             | OIDC provider the dashboard talks to                                                                 | `https://<domain.global>/oauth2` |
+| global.server.authStore.engine    | Embedded IdP store engine, `sqlite3` or `postgres`.  Unset keeps it at `<dataDir>/idp.db`.           | `''`                     |
+| global.server.authStore.dsn       | Connection string, required when `authStore.engine` is `postgres`                                    | `''`                     |
+| global.server.authStore.file      | Custom sqlite path; relative paths resolve against `dataDir`                                         | `''`                     |
+| global.auth.issuerUrl             | Issuer the server advertises and validates against.  Must be on `domain.global` — see [Authentication](#authentication). | `https://<domain.global>/oauth2` |
+| global.auth.authority             | OIDC provider the dashboard talks to.  Must be on `domain.global`.                                   | `https://<domain.global>/oauth2` |
 | global.auth.clientId              | OIDC client id                                                                                       | `netbird-dashboard`      |
 | global.auth.clientSecret          | OIDC client secret.  Prefer `existingSecret`.                                                        | `''`                     |
 | global.auth.existingSecret        | Secret holding the OIDC client credentials                                                           | `''`                     |
@@ -109,6 +165,16 @@ To use the minimal setup, you will require
 | global.auth.redirectURI           | OIDC redirect URI                                                                                    | `/nb-auth`               |
 | global.auth.silentRedirectURI     | OIDC silent redirect URI                                                                             | `/nb-silent-auth`        |
 | global.auth.useAuth0              | Use Auth0                                                                                            | `false`                  |
+| global.auth.localAuthDisabled     | Turn off Dex email/password login.  Requires a connector to already exist, or the server won't start. | `false`                 |
+| global.auth.cliRedirectURIs       | Redirect URIs for `netbird up` browser login                                                         | `['http://localhost:53000/']` |
+| global.auth.postLogoutRedirectURIs | Absolute URLs Dex may return to after logout.  Matched exactly, no wildcards.                       | `[]`                     |
+| global.auth.grantTypes            | Restrict allowed OAuth2 grants.  Empty means Dex's default set.                                      | `[]`                     |
+| global.auth.sessionCookieEncryptionKey | AES key for IdP session cookies, 16/24/32 bytes.  Unset means sessions drop on restart.          | `''`                     |
+| global.auth.owner.email           | Initial admin, seeded as a Dex static password on every boot                                         | `''`                     |
+| global.auth.owner.passwordHash    | **bcrypt hash** for that admin — `htpasswd -bnBC 10 "" 'pw' \| tr -d ':\n'`.  Plaintext is rejected. | `''`                     |
+| global.auth.mfa.sessionMaxLifetime | Max MFA session duration from creation                                                              | `24h`                    |
+| global.auth.mfa.sessionIdleTimeout | MFA session expires after this idle period                                                          | `1h`                     |
+| global.auth.mfa.sessionRememberMe | Pre-check "remember me" at login                                                                     | `false`                  |
 | global.serviceAccount.create      | Create service account                                                                               | `true`                   |
 | global.serviceAccount.automount   | Auto-mount service account                                                                           | `true`                   |
 | global.serviceAccount.annotations | Service account annotations                                                                          | `{}`                     |
@@ -123,7 +189,7 @@ To use the minimal setup, you will require
 | fullnameOverride                   | Replace the whole name     | `''`                         |
 | **Dashboard**                      |                            |                              |
 | dashboard.image.repository         | Dashboard image repository | `'netbirdio/dashboard'`      |
-| dashboard.image.tag                | Dashboard image tag        | `'v2.39.0'`                  |
+| dashboard.image.tag                | Dashboard image tag        | `'v2.92.0'`                  |
 | dashboard.image.pullPolicy         | Image pull policy          | `'IfNotPresent'`             |
 | dashboard.annotations              | Pod annotations            | `{}`                         |
 | dashboard.deploymentAnnotations    | Deployment-object annotations (Reloader etc.) | `{}`      |
@@ -140,11 +206,13 @@ To use the minimal setup, you will require
 | dashboard.service.type             | Dashboard service type     | `'ClusterIP'`                |
 | dashboard.service.annotations      | Dashboard service annotations | `{}`                      |
 | dashboard.extra_env                | Additional env vars        | `[]`                         |
+| dashboard.letsencrypt.domain       | Domain for certbot in the dashboard container.  Empty skips it. | `''`    |
+| dashboard.letsencrypt.email        | Email certbot registers with | `''`                       |
 | dashboard.extra_volumes            | Additional volumes         | `[]`                         |
 | dashboard.extra_volumeMounts       | Additional volume mounts   | `[]`                         |
 | **Server**                         |                            |                              |
 | server.image.repository            | Server image repository    | `'netbirdio/netbird-server'` |
-| server.image.tag                   | Server image tag           | `'0.77.1'`                   |
+| server.image.tag                   | Server image tag           | `'0.78.1'`                   |
 | server.image.pullPolicy            | Image pull policy          | `'IfNotPresent'`             |
 | server.annotations                 | Pod annotations            | `{}`                         |
 | server.deploymentAnnotations       | Deployment-object annotations (Reloader etc.) | `{}`      |

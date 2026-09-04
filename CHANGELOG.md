@@ -61,15 +61,60 @@ Diverges from cclloyd/helm-netbird 1.2.0.
   `global.persistence.overrideVolumeMount`. Setting them never did anything;
   they are gone from `values.yaml` so nobody expects them to.
 
+- **`global.auth.authority` and `global.auth.issuerUrl` must name
+  `global.domain.global`, or the render fails.** Both configure NetBird's own
+  embedded Dex, so a foreign host there was never going to work: the server
+  ignores it and keeps issuing through Dex, while the dashboard goes off to the
+  other provider, logs the user in and then has its token rejected. That
+  combination used to render happily and fail at login with
+  `unable to find appropriate key`. Checked from the dashboard Deployment as
+  well as the config Secret, so it fires under `existingConfigSecret` too.
+
+  If you set these to an external provider, unset them and attach the provider
+  to Dex as a connector - see [Authentication](README.md#authentication).
+- **`global.auth.issuerUrl` no longer falls back to `global.auth.authority`.**
+  It defaults straight to `https://<domain.global>/oauth2`. With the check
+  above the two can only ever share a host, so the fallback made no difference
+  to what rendered; it only made it look like pointing `authority` elsewhere
+  would move the issuer with it.
+- **`global.server.reverseProxy` now fails the render when
+  `existingConfigSecret` is also set**, joining `encryption_key`, `auth_secret`
+  and `stun.external`. It only reaches NetBird through the config file the
+  chart writes, so with that file replaced it was silently ignored. Only a
+  customised block trips this - the shipped default does not, so existing
+  `existingConfigSecret` installs keep rendering.
+
 ### Added
 
 - `global.server.existingConfigSecret` - point at a Secret holding the whole
   `config.yaml` and the chart renders none of its own. Fails the render if a
   value that only reaches NetBird through that file is also set.
 - `global.auth.*` - issuer, authority, client id, audience, scopes and redirect
-  URIs for an external OIDC provider. Credentials come from values or from
-  `global.auth.existingSecret`, whose key names are configurable; set
-  `global.auth.publicClient` for a PKCE client with no secret.
+  URIs for NetBird's **embedded** Dex identity provider, and the dashboard's
+  view of it. Credentials come from values or from `global.auth.existingSecret`,
+  whose key names are configurable; set `global.auth.publicClient` for a PKCE
+  client with no secret.
+
+  These do **not** point NetBird at an external OIDC provider, and an earlier
+  draft of this entry wrongly said they did. The combined image this chart runs
+  hardcodes its embedded Dex on and overwrites the server's issuer, audience,
+  JWKS location and discovery endpoint with Dex's own values; no `config.yaml`
+  field changes that. External providers attach to Dex as upstream connectors
+  instead - see [Authentication](README.md#authentication).
+- `global.auth.localAuthDisabled`, `cliRedirectURIs`, `postLogoutRedirectURIs`,
+  `grantTypes`, `sessionCookieEncryptionKey`, `owner.*` and `mfa.*` - the
+  embedded IdP settings the combined image actually accepts, none of which the
+  chart previously emitted. `owner` seeds an initial admin as a Dex static
+  password, which Dex re-applies on every boot, so the first-run "create the
+  first admin account" screen can be skipped declaratively.
+
+  `owner.passwordHash` is named for what it holds: NetBird calls the field
+  `password` but stores the value verbatim as the bcrypt hash, so a plaintext
+  password there yields an account nobody can log into. The chart rejects
+  anything that is not a bcrypt hash.
+- `global.server.authStore.*` - engine, DSN and file for the embedded IdP's own
+  store (Dex users, connectors, sessions), which defaults to sqlite at
+  `<dataDir>/idp.db` alongside the main store.
 - `global.route.annotations` applies to every rendered route, with
   `dashboardAnnotations` / `serverAnnotations` / `stunAnnotations` merged over
   it per route.
@@ -125,6 +170,19 @@ Diverges from cclloyd/helm-netbird 1.2.0.
 
 ### Changed
 
-- NetBird 0.66.0 -> 0.77.1, dashboard v2.33.0 -> v2.39.0. The sqlite store is
+- NetBird 0.66.0 -> 0.78.1, dashboard v2.33.0 -> v2.92.0. The sqlite store is
   migrated in place, so snapshot the PVC before upgrading.
+
+  The dashboard now builds its Content-Security-Policy at container start from
+  `AUTH_AUTHORITY`, `NETBIRD_MGMT_API_ENDPOINT` and `LETSENCRYPT_DOMAIN`, then
+  reloads nginx - and exits non-zero if that reload fails, where previously it
+  could not fail. It also hard-exits when `AUTH_AUTHORITY`, `AUTH_CLIENT_ID`,
+  `AUTH_AUDIENCE`, `AUTH_SUPPORTED_SCOPES`, `USE_AUTH0` or
+  `NETBIRD_MGMT_API_ENDPOINT` is empty; the chart sets all six.
+- `LETSENCRYPT_DOMAIN` on the dashboard comes from the new
+  `dashboard.letsencrypt.domain` (with `.email` alongside it) and defaults to
+  empty rather than the hardcoded `"none"`. Certbot stays off either way -
+  `init_cert.sh` reads an empty value as `none` - but the new CSP builder
+  treats any non-empty value as a real domain, so `"none"` was putting a junk
+  `https://none` into `connect-src`.
 - Charts publish to this fork's GHCR namespace.

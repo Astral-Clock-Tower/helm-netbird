@@ -75,6 +75,14 @@ global:
       accessLogRetentionDays:
       accessLogCleanupIntervalHours:
 
+    # The embedded IdP's store, separate from the main one. Unset, it is sqlite
+    # at <dataDir>/idp.db on the same PVC; postgres keeps identity data off
+    # local disk and needs `dsn`.
+    authStore:
+      engine: ''  # sqlite3 (default) or postgres
+      dsn: ''
+      file: ''    # custom sqlite path; relative paths resolve against dataDir
+
     # Name of an existing Secret holding the whole config.yaml under a
     # `config.yaml` key, so the file can be managed by SOPS, External Secrets,
     # Vault or sealed-secrets instead of by the values above.
@@ -89,7 +97,10 @@ global:
     #
     # Setting this stops these values reaching NetBird, so the chart fails the
     # render rather than ignoring them: encryption_key, auth_secret,
-    # stun.external, auth.issuerUrl.
+    # stun.external, reverseProxy, authStore.*, and the config-file half of
+    # global.auth.* - issuerUrl, localAuthDisabled, cliRedirectURIs,
+    # postLogoutRedirectURIs, grantTypes, sessionCookieEncryptionKey, owner.*
+    # and mfa.*.
     #
     # These still apply, and your file has to agree with them:
     #   port, stun.port  container ports, both Services, the probes and the
@@ -97,8 +108,12 @@ global:
     #                    listenAddress and stunPorts you set in your file.
     #   stun.enabled     still gates that exposure; it just no longer writes
     #                    stunPorts, which is now your file's business.
-    #   global.auth.*    configures the dashboard's environment (except
-    #                    issuerUrl, which is config-file only).
+    #   global.auth.*    the dashboard half - authority, clientId, audience,
+    #                    clientSecret/existingSecret, publicClient,
+    #                    supportedScopes, redirectURI, silentRedirectURI,
+    #                    useAuth0 - still configures the dashboard's
+    #                    environment, and authority is still checked against
+    #                    domain.global.
     existingConfigSecret: ''
 
   persistence:
@@ -138,28 +153,24 @@ global:
     serverAnnotations: {}
     stunAnnotations: {}
 
-  # OIDC for the dashboard and the server. Set these to point at an external
-  # provider (Zitadel, Authentik, Auth0, Keycloak).
+  # OIDC for NetBird's own embedded Dex, and the dashboard's view of it. This
+  # block does not point NetBird at an external provider - the combined image
+  # has no such setting, and its Dex is always the issuer. The defaults are
+  # correct for that, so most installs set nothing here.
   #
-  # Every value in this block defaults to the behaviour the chart had before
-  # the block existed, so an install that sets none of them renders exactly as
-  # it did before: this cannot break a deployment already using the chart.
-  #
-  # These cover both halves: `authority` and the client credentials configure
-  # the dashboard through its environment, while `issuerUrl` is written into
-  # the server's own config file as its `server.auth.issuer` field. Both must
-  # agree for an external IdP to work end to end - a dashboard pointed at a new
-  # provider while the server still expects the old issuer authenticates the
-  # user and then rejects the token.
+  # External providers (Zitadel, Authentik, Auth0, Keycloak) attach to Dex as
+  # upstream connectors at runtime, which is a one-time action in the dashboard
+  # and cannot be expressed in values. See Authentication in the README.
   auth:
-    # Issuer the SERVER validates tokens against, written into its config file
-    # as server.auth.issuer. Falls back to `authority` when unset, so pointing
-    # at an external IdP normally means setting `authority` alone and both
-    # halves follow. Set this only when the server must expect a different
-    # issuer from the URL the dashboard talks to.
-    issuerUrl: ''
-    # OIDC provider the DASHBOARD talks to (env AUTH_AUTHORITY).
+    # server.auth.issuer. Dex serves its own discovery document under this, so
+    # the host has to be domain.global; the chart fails the render otherwise.
+    issuerUrl: ''         # default: https://<domain.global>/oauth2
+    # env AUTH_AUTHORITY. Same constraint as issuerUrl: point it elsewhere and
+    # the dashboard authenticates against a provider the server does not trust.
     authority: ''         # default: https://<domain.global>/oauth2
+    # Dex's client registration for the dashboard. NetBird hardcodes the
+    # audience it validates, so leave these alone; an external provider's client
+    # id belongs on the connector, not here.
     clientId: ''          # default: netbird-dashboard
     audience: ''          # default: netbird-dashboard
     # Prefer existingSecret over this; anything here is committed in plaintext.
@@ -197,6 +208,40 @@ global:
     silentRedirectURI: '' # default: /nb-silent-auth
     useAuth0:             # default: false
 
+    # Everything below goes into the server's config file, so
+    # global.server.existingConfigSecret replaces it rather than merging.
+
+    # Set this only once a connector exists - with none, the server refuses to
+    # start rather than leaving nobody able to log in.
+    localAuthDisabled: false
+    # Where `netbird up` returns after a browser login.
+    cliRedirectURIs: []   # default: ['http://localhost:53000/']
+    # Absolute URLs, matched exactly by Dex. One has to be the dashboard's base
+    # URL or its logout button does nothing.
+    postLogoutRedirectURIs: []  # eg ['https://<domain.global>/']
+    # Empty means Dex's full default set. Dropping
+    # 'urn:ietf:params:oauth:grant-type:device_code' disables the device flow;
+    # authorization_code and refresh_token have to stay or logins break.
+    grantTypes: []
+    # 16, 24 or 32 bytes raw, or base64 of one of those: `openssl rand -hex 16`.
+    # Unset, NetBird generates one per boot, so restarts log everyone out.
+    sessionCookieEncryptionKey: ''
+    # Seeds an initial admin, which suppresses the first-run "create the first
+    # admin account" screen. Dex re-applies this on every boot, so it is
+    # idempotent.
+    owner:
+      email: ''
+      # A bcrypt hash, not a password - NetBird stores the value verbatim as
+      # the hash, so plaintext yields an account nobody can log into. Rejected
+      # at render time. `htpasswd -bnBC 10 "" 'yourpassword' | tr -d ':\n'`
+      passwordHash: ''
+    # MFA session behaviour, applied when TOTP is enabled for an account.
+    mfa:
+      sessionMaxLifetime: ''  # default: 24h
+      sessionIdleTimeout: ''  # default: 1h
+      # Pre-check "remember me" at login.
+      sessionRememberMe: false
+
   serviceAccount:
     create: true
     automount: true
@@ -207,9 +252,16 @@ global:
 dashboard:
   # Additional env vars appended to the dashboard container.
   extra_env: []
+  # Certbot inside the dashboard container. Leave `domain` empty when something
+  # in front terminates TLS, as it does in any gateway setup. Do not use the
+  # literal "none": it skips certbot, but the dashboard's startup CSP builder
+  # reads it as a real domain.
+  letsencrypt:
+    domain: ''
+    email: ''
   image:
     repository: netbirdio/dashboard
-    tag: v2.39.0
+    tag: v2.92.0
     pullPolicy: IfNotPresent
   annotations: {}
   # Annotations on the Deployment object itself, as opposed to `annotations`
@@ -238,7 +290,7 @@ dashboard:
 server:
   image:
     repository: netbirdio/netbird-server
-    tag: 0.77.1
+    tag: 0.78.1
     pullPolicy: IfNotPresent
   annotations: {}
   # Annotations on the Deployment object itself, as opposed to `annotations`
