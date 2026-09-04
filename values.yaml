@@ -75,6 +75,28 @@ global:
       accessLogRetentionDays:
       accessLogCleanupIntervalHours:
 
+    # NetBird's main store. sqlite, the default, keeps it on the PVC.
+    #
+    # Left empty on postgres/mysql, `dsn` falls through to
+    # NB_STORE_ENGINE_POSTGRES_DSN (or _MYSQL_DSN) from the environment -
+    # NetBird only copies a non-empty one over that variable. Supply it from a
+    # Secret with `server.extra_env` and no password reaches the rendered
+    # config Secret.
+    store:
+      engine: ''  # sqlite (default), postgres or mysql
+      dsn: ''
+
+    # Activity events, its own database. Unset, sqlite at <dataDir>/events.db.
+    #
+    # No env fallback like the store above: naming postgres here without a
+    # `dsn` is rejected at startup. To keep the string in a Secret, leave this
+    # block unset and set NB_ACTIVITY_EVENT_STORE_ENGINE and
+    # NB_ACTIVITY_EVENT_POSTGRES_DSN in `server.extra_env` instead.
+    activityStore:
+      engine: ''  # sqlite (default) or postgres
+      dsn: ''
+      file: ''    # custom sqlite path; relative paths resolve against dataDir
+
     # The embedded IdP's store, separate from the main one. Unset, it is sqlite
     # at <dataDir>/idp.db on the same PVC; postgres keeps identity data off
     # local disk and needs `dsn`.
@@ -97,10 +119,10 @@ global:
     #
     # Setting this stops these values reaching NetBird, so the chart fails the
     # render rather than ignoring them: encryption_key, auth_secret,
-    # stun.external, reverseProxy, authStore.*, and the config-file half of
-    # global.auth.* - issuerUrl, localAuthDisabled, cliRedirectURIs,
-    # postLogoutRedirectURIs, grantTypes, sessionCookieEncryptionKey, owner.*
-    # and mfa.*.
+    # stun.external, reverseProxy, store.*, activityStore.*, authStore.*, and
+    # the config-file half of global.auth.* - issuerUrl, localAuthDisabled,
+    # cliRedirectURIs, postLogoutRedirectURIs, grantTypes,
+    # sessionCookieEncryptionKey, owner.* and mfa.*.
     #
     # These still apply, and your file has to agree with them:
     #   port, stun.port  container ports, both Services, the probes and the
@@ -315,6 +337,14 @@ server:
   extra_volumes: []
   extra_volumeMounts: []
   extra_args: []
+  # NetBird configures itself from config.yaml, so this is for the few NB_*
+  # variables its packages read straight from the environment - the store DSNs
+  # above, NB_IDP_SESSION_COOKIE_ENCRYPTION_KEY, NB_CACHE_REDIS_ADDRESS - and
+  # ordinary operational env. authStore.dsn is not among them.
+  #
+  # Secrets referenced here are outside server.reloadOnConfigChange, which
+  # hashes the config Secret alone; point Reloader at them instead.
+  extra_env: []
   # Hash the rendered config into the pod template, so that changing any value
   # that ends up in config.yaml rolls the pod. Without it nothing does: the file
   # is mounted with subPath, which never receives Secret updates, so the running

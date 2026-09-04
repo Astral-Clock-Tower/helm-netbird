@@ -1,3 +1,4 @@
+{{- include "netbird.validateExtraEnv" (dict "path" "server.extra_env" "env" .Values.server.extra_env) -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -106,6 +107,14 @@ spec:
             {{- range .Values.server.extra_args }}
             - "{{ . }}"
             {{- end }}
+          {{- /*
+          The chart sets no environment of its own here, so the block exists
+          only when asked for and installs without it render as they did.
+          */}}
+          {{- with .Values.server.extra_env }}
+          env:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           livenessProbe:
             {{- if .Values.server.livenessProbe }}
             {{- toYaml .Values.server.livenessProbe | nindent 12 }}
